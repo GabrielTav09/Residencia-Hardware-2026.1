@@ -51,7 +51,6 @@ Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 ***Fluxograma de funcionamento da calibração** 
 
 ```mermaid
-```mermaid
 sequenceDiagram
     autonumber
     actor Usuario as 📱 USUÁRIO / APLICATIVO (Front-end)
@@ -62,7 +61,7 @@ sequenceDiagram
     Note over ESP32: Para medições normais de NTU
     ESP32-->>Usuario: Muda para CAL_0 & Envia: "COLOQUE_0_NTU"
 
-    rect rgb(240, 248, 255)
+    rect rgb(30, 30, 40)
         Note over Usuario, ESP32: Ciclo de Coleta de Amostras (Passo a Passo)
         Usuario->>ESP32: Insere Frasco de 0 NTU e clica em "CONFIRM_STEP"
         Note over ESP32: Executa Filtro de Ruído:<br/>Mede Voltagem Média (800x)
@@ -72,24 +71,23 @@ sequenceDiagram
 
     Note over Usuario, ESP32: : <br/> Repete o mesmo processo exato para os frascos de 100 NTU, 200 NTU, 300 NTU e 400 NTU <br/> :
 
-    rect rgb(240, 248, 255)
+    rect rgb(30, 30, 40)
         Usuario->>ESP32: Insere Frasco de 500 NTU e clica em "CONFIRM_STEP"
         Note over ESP32: Mede Voltagem Média (800x)
         Note over ESP32: Salva no array leiturasV[5]
         Note over ESP32: Avança para o estado: PROCESSAR
     end
 
-    critical Regressão Polinomial de 2º Grau (Função calcularNovaCurva)
-        Note over ESP32: 1. MÍNIMOS QUADRADOS<br/>Executa somatórios matemáticos e monta a matriz
-        Note over ESP32: 2. REGRA DE CRAMER<br/>Resolve determinantes e isola os coeficientes (a, b, c)
-        Note over ESP32: 3. MEMÓRIA FLASH (NVS)<br/>Salva coeficientes permanentemente via Preferences
-    end
+    Note over ESP32: FUNÇÃO calcularNovaCurva()<br/>Executa Regressão Polinomial (Mínimos Quadrados)
 
-    Note over ESP32: Força estadoAtual = IDLE
+    Note over ESP32: Aplica Regra de Cramer e encontra (a, b, c)
+
+    Note over ESP32: Salva coeficientes na Flash (Preferences)<br/>Força estadoAtual = IDLE
     ESP32-->>Usuario: Envia feedback final: "CALIB_OK"
     Note over Usuario: Tela exibe: "Calibração Concluída!"
 
     Note over ESP32: [ Loop Principal Destravado ]<br/>Retoma Medição Normal de NTU para a Caranha
+```
 
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
