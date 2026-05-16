@@ -48,7 +48,7 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 ---
 Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 
-*** 📝Fluxograma de funcionamento da calibração** 
+## 📝Fluxograma de funcionamento da calibração** 
 `Link do documento contendo o fluxograma:` https://docs.google.com/document/d/1QTFS1HhQR8ck_HtCRx5Kt2yM3TgcG6MsAOZ4cucw9zI/edit?usp=sharing
 
 
