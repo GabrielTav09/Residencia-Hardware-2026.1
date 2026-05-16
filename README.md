@@ -50,44 +50,50 @@ Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 
 ***Fluxograma de funcionamento da calibração** 
 
-USUÁRIO / APLICATIVO (Front-end)         SOFTWARE / ESP32 (Firmware)
-+--------------------------------+       +---------------------------------+
-|                                |       |                                 |
-|  1. Clica em "START_CAL"       |------>|  Muda estadoAtual para CAL_0    |
-|                                |       |  Envia via BLE: "COLOQUE_0_NTU" |
-|                                |       +---------------------------------+
-|  2. Insere o Frasco de 0 NTU   |                       |
-|     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
-|                                |       |  Mede Voltagem Média (800x)     |
-|                                |       |  Salva no array leiturasV[0]    |
-|                                |       |  Avança para CAL_100            |
-|                                |       |  Envia via BLE: "COLOQUE_100_NTU"
-|                                |       +---------------------------------+
-|                                |                       |
-|               :                |                       :
-|    [ Repete o mesmo processo   |            [ Repete o mesmo processo    |
-|      para 100, 200, 300, 400 ] |              para 100, 200, 300, 400 ]  |
-|               :                |                       :
-|                                |                       |
-|  3. Insere o Frasco de 500 NTU |       +---------------------------------+
-|     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
-|                                |       |  Mede Voltagem Média (800x)     |
-|                                |       |  Salva no array leiturasV[5]    |
-|                                |       |  Avança para PROCESSAR          |
-|                                |       +---------------------------------+
-|                                |                       |
-|                                |                       v
-|                                |       +---------------------------------+
-|                                |       |  REGRESSÃO POLINOMIAL (2º Grau) |
-|                                |       |  - Método dos Mínimos Quadrados |
-|  4. Recebe o feedback na tela  |       |  - Resolução por Regra de Cramer|
-|     "Calibração Concluída!"    |<------|  - Grava coeficientes na Flash  |
-|                                |       |  - Retorna estadoAtual para IDLE|
-+--------------------------------+       +---------------------------------+
-|
-v
-[ Retoma Medição Normal de NTU ]
+```mermaid
+graph TD
+    %% Estilos de Cores
+    classDef usuario fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef software fill:#efebe9,stroke:#5d4037,stroke-width:2px;
+    classDef processo fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
 
+    subgraph "AÇÕES DO USUÁRIO (Front-end)"
+        A[1. Clica em 'START_CAL']:::usuario
+        C[2. Insere Frasco de 0 NTU e clica em 'CONFIRM_STEP']:::usuario
+        E[3. Repete o processo para os frascos de 100 a 400 NTU]:::usuario
+        G[4. Insere Frasco de 500 NTU e clica em 'CONFIRM_STEP']:::usuario
+        I[5. Recebe feedback de sucesso 'CALIB_OK']:::usuario
+    end
+
+    subgraph "RESPOSTAS DO SOFTWARE (ESP32)"
+        B[Muda para CAL_0 <br> Envia via BLE: 'COLOQUE_0_NTU']:::software
+        D[Mede Voltagem Média 800x <br> Salva no array leiturasV <br> Pede próximo frasco]:::software
+        F[Aguarda interações do usuário]:::software
+        H[Coleta última voltagem <br> Muda para estado PROCESSAR]:::software
+        
+        subgraph P1 [REGRESSÃO POLINOMIAL DE 2º GRAU]
+            J[1. MÍNIMOS QUADRADOS <br> Executa laço para montar matriz de erros]:::processo
+            K[2. REGRA DE CRAMER <br> Resolve determinantes e encontra a, b, c]:::processo
+        end
+        
+        L[Grava coeficientes na Flash <br> Retorna para estado IDLE]:::software
+        M[Retoma Medição Normal de NTU]:::software
+    end
+
+    %% Conexões do Fluxo
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    H --> J
+    J --> K
+    K --> L
+    L --> I
+    L --> M
+````
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
 
