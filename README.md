@@ -51,43 +51,45 @@ Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 ***Fluxograma de funcionamento da calibração** 
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Usuario as 📱 USUÁRIO / APLICATIVO (Front-end)
-    participant ESP32 as ⚙️ SOFTWARE / ESP32 (Firmware)
+flowchart TD
+    %% Configuração de Estilos e Cores para Modo Escuro/Claro do GitHub
+    classDef usuario fill:#E1F5FE,stroke:#0288D1,stroke-width:2px,color:#01579B;
+    classDef esp32 fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#E65100;
+    classDef sucesso fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#1B5E20;
+    classDef calculo fill:#EDE7F6,stroke:#7E57C2,stroke-width:2px,color:#4A148C;
 
-    Note over Usuario, ESP32: Início do Processo de Calibração
-    Usuario->>ESP32: Clica em "START_CAL"
-    Note over ESP32: Para medições normais de NTU
-    ESP32-->>Usuario: Muda para CAL_0 & Envia: "COLOQUE_0_NTU"
+    %% Nós do Fluxograma
+    A([📱 Iniciar no Aplicativo]) ::: usuario
+    B[⚙️ ESP32 Pausa as Medições] ::: esp32
+    
+    C[📱 Tela pede: 'Coloque Frasco de 0 NTU'] ::: usuario
+    D[⚙️ ESP32 Analisa o Líquido por alguns segundos] ::: esp32
+    
+    E[📱 Tela pede para trocar o Frasco <br><i>(Repete para 100, 200, 300, 400 e 500 NTU)</i>] ::: usuario
+    F[⚙️ ESP32 Coleta as amostras de cada nível] ::: esp32
+    
+    G[📱 Tela pede: 'Coloque o último Frasco (500 NTU)'] ::: usuario
+    H[⚙️ ESP32 Faz a leitura final] ::: esp32
+    
+    I[🔮 Inteligência Matemática <br> Ajusta a curva do sensor perfeitamente <br> e salva na memória estável] ::: calculo
+    
+    J[⚙️ ESP32 Avisa que terminou] ::: esp32
+    K([🎉 Tela exibe: 'Calibração Concluída!']) ::: sucesso
+    L([🐟 Sistema volta a monitorar o tanque automaticamente]) ::: sucesso
 
-    rect rgb(30, 30, 40)
-        Note over Usuario, ESP32: Ciclo de Coleta de Amostras (Passo a Passo)
-        Usuario->>ESP32: Insere Frasco de 0 NTU e clica em "CONFIRM_STEP"
-        Note over ESP32: Executa Filtro de Ruído:<br/>Mede Voltagem Média (800x)
-        Note over ESP32: Salva no array leiturasV[0]
-        ESP32-->>Usuario: Avança estado & Envia: "COLOQUE_100_NTU"
-    end
-
-    Note over Usuario, ESP32: : <br/> Repete o mesmo processo exato para os frascos de 100 NTU, 200 NTU, 300 NTU e 400 NTU <br/> :
-
-    rect rgb(30, 30, 40)
-        Usuario->>ESP32: Insere Frasco de 500 NTU e clica em "CONFIRM_STEP"
-        Note over ESP32: Mede Voltagem Média (800x)
-        Note over ESP32: Salva no array leiturasV[5]
-        Note over ESP32: Avança para o estado: PROCESSAR
-    end
-
-    Note over ESP32: FUNÇÃO calcularNovaCurva()<br/>Executa Regressão Polinomial (Mínimos Quadrados)
-
-    Note over ESP32: Aplica Regra de Cramer e encontra (a, b, c)
-
-    Note over ESP32: Salva coeficientes na Flash (Preferences)<br/>Força estadoAtual = IDLE
-    ESP32-->>Usuario: Envia feedback final: "CALIB_OK"
-    Note over Usuario: Tela exibe: "Calibração Concluída!"
-
-    Note over ESP32: [ Loop Principal Destravado ]<br/>Retoma Medição Normal de NTU para a Caranha
-```
+    %% Conexões do Fluxo
+    A -->|Botão 'Iniciar Calibração'| B
+    B --> C
+    C -->|Botão 'Confirmar Passo'| D
+    D --> E
+    E -->|Botão 'Confirmar Passo'| F
+    F --> G
+    G -->|Botão 'Confirmar Passo'| H
+    H --> I
+    I --> J
+    J --> K
+    J --> L
+ ```
 
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
