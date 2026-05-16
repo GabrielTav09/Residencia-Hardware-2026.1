@@ -6,11 +6,13 @@ Este repositório contém os códigos e a documentação técnica para o projeto
 
 O código principal, `Codigo_do_ESP32_CALIBRACAO_AUTOMATICA`, foi desenvolvido para gerenciar o processo de calibração de sensores de forma autônoma. Ele permite que o hardware ajuste seus parâmetros internos sem a necessidade de intervenção manual constante, garantindo maior precisão na coleta de dados e estabilidade do sistema em diferentes ambientes.
 
+
 ## 🚀 Funcionalidades
 
 * **Calibração Automática:** Algoritmos para ajuste dinâmico de sensores.
 * **Manipulação de Dados JSON:** Utilização da biblioteca ArduinoJson para comunicação ou armazenamento de configurações estruturadas.
 * **Processamento em Tempo Real:** Aproveitamento do processamento Dual-Core do ESP32 para tarefas de hardware e calibração simultâneas.
+
 
 ## 🛠️ Tecnologias e Ferramentas
 
@@ -19,6 +21,7 @@ O código principal, `Codigo_do_ESP32_CALIBRACAO_AUTOMATICA`, foi desenvolvido p
 * **Placa Utilizada:** ESP32 Dev Module (Espressif Systems)
 * **Versão do Core ESP32:** 3.3.8
 
+
 ## 📚 Bibliotecas Utilizadas
 
 Para o correto funcionamento do código, é necessário instalar as seguintes dependências através do Gerenciador de Bibliotecas da Arduino IDE:
@@ -26,6 +29,7 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 1.  **ArduinoJson** (por Benoit Blanchon)
     * **Versão: 7.4.1** .
     * *Finalidade:* Utilizada para serialização e desserialização de objetos JSON, facilitando a troca de mensagens e configurações de calibração.
+
 
 ## 🔧 Configuração e Instalação
 
@@ -40,13 +44,12 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
     * Selecione a porta serial correta.
     * Clique em **Upload** (Seta para a direita).
 
+
 ## 📂 Estrutura de Arquivos
 
 * `Codigo_do_ESP32_CALIBRACAO_AUTOMATICA.ino`: Script principal com a lógica de calibração.
 * `README.md`: Documentação do projeto.
 
----
-Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 
 ## 📝Fluxograma de funcionamento da calibração** 
 `Link do documento contendo o fluxograma:` https://docs.google.com/document/d/1QTFS1HhQR8ck_HtCRx5Kt2yM3TgcG6MsAOZ4cucw9zI/edit?usp=sharing
