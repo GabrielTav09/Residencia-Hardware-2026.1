@@ -48,48 +48,8 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 ---
 Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 
-***Fluxograma de funcionamento da calibração** 
-
-```mermaid
-flowchart TD
-    %% Configuração de Estilos e Cores para Modo Escuro/Claro do GitHub
-    classDef usuario fill:#E1F5FE,stroke:#0288D1,stroke-width:2px,color:#01579B;
-    classDef esp32 fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#E65100;
-    classDef sucesso fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#1B5E20;
-    classDef calculo fill:#EDE7F6,stroke:#7E57C2,stroke-width:2px,color:#4A148C;
-
-    %% Nós do Fluxograma
-    A([📱 Iniciar no Aplicativo]) ::: usuario
-    B[⚙️ ESP32 Pausa as Medições] ::: esp32
-    
-    C[📱 Tela pede: 'Coloque Frasco de 0 NTU'] ::: usuario
-    D[⚙️ ESP32 Analisa o Líquido por alguns segundos] ::: esp32
-    
-    E[📱 Tela pede para trocar o Frasco <br><i>(Repete para 100, 200, 300, 400 e 500 NTU)</i>] ::: usuario
-    F[⚙️ ESP32 Coleta as amostras de cada nível] ::: esp32
-    
-    G[📱 Tela pede: 'Coloque o último Frasco (500 NTU)'] ::: usuario
-    H[⚙️ ESP32 Faz a leitura final] ::: esp32
-    
-    I[🔮 Inteligência Matemática <br> Ajusta a curva do sensor perfeitamente <br> e salva na memória estável] ::: calculo
-    
-    J[⚙️ ESP32 Avisa que terminou] ::: esp32
-    K([🎉 Tela exibe: 'Calibração Concluída!']) ::: sucesso
-    L([🐟 Sistema volta a monitorar o tanque automaticamente]) ::: sucesso
-
-    %% Conexões do Fluxo
-    A -->|Botão 'Iniciar Calibração'| B
-    B --> C
-    C -->|Botão 'Confirmar Passo'| D
-    D --> E
-    E -->|Botão 'Confirmar Passo'| F
-    F --> G
-    G -->|Botão 'Confirmar Passo'| H
-    H --> I
-    I --> J
-    J --> K
-    J --> L
- ```
+*** 📝Fluxograma de funcionamento da calibração** 
+`Link do documento contendo o fluxograma:` https://docs.google.com/document/d/1QTFS1HhQR8ck_HtCRx5Kt2yM3TgcG6MsAOZ4cucw9zI/edit?usp=sharing
 
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
