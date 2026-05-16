@@ -90,7 +90,7 @@ sequenceDiagram
     Note over Usuario: Tela exibe: "Calibração Concluída!"
 
     Note over ESP32: [ Loop Principal Destravado ]<br/>Retoma Medição Normal de NTU para a Caranha
-````
+
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
 
