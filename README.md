@@ -24,16 +24,16 @@ O código principal, `Codigo_do_ESP32_CALIBRACAO_AUTOMATICA`, foi desenvolvido p
 Para o correto funcionamento do código, é necessário instalar as seguintes dependências através do Gerenciador de Bibliotecas da Arduino IDE:
 
 1.  **ArduinoJson** (por Benoit Blanchon)
-    * **Versão recomendada:** 7.4.1 ou superior.
+    * **Versão: 7.4.1** .
     * *Finalidade:* Utilizada para serialização e desserialização de objetos JSON, facilitando a troca de mensagens e configurações de calibração.
 
 ## 🔧 Configuração e Instalação
 
 1.  **Instalação da Placa:**
-    * No Gerenciador de Placas (`Boards Manager`), certifique-se de ter o pacote **esp32 by Espressif Systems** instalado (versão 3.3.8 testada).
+    * No Gerenciador de Placas (`Boards Manager`), certifique-se de ter o pacote **`esp32 by Espressif Systems`** instalado (versão 3.3.8 testada) e **`Arduino AVR Boards`** .
 2.  **Instalação da Biblioteca:**
-    * Vá em `Sketch` > `Include Library` > `Manage Libraries...`
-    * Procure por **ArduinoJson** e instale a versão mencionada.
+    * Vá na `Lateral direita` > `Include Library` > `Manage Libraries...`
+    * Procure por **ArduinoJson** e instale a versão **`7.4.1`**
 3.  **Upload do Código:**
     * Conecte seu ESP32 via USB.
     * Selecione a placa `ESP32 Dev Module`.
