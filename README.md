@@ -47,3 +47,43 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 
 ---
 Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
+
+***Fluxograma de funcionamento da calibração** 
+
+   **USUÁRIO / APLICATIVO (Front-end)**       **SOFTWARE / ESP32 (Firmware)**
+   +--------------------------------+       +---------------------------------+
+   |                                |       |                                 |
+   |  1. Clica em "START_CAL"       |------>|  Muda estadoAtual para CAL_0    |
+   |                                |       |  Envia via BLE: "COLOQUE_0_NTU" |
+   |                                |       +---------------------------------+
+   |  2. Insere o Frasco de 0 NTU   |                       |
+   |     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
+   |                                |       |  Mede Voltagem Média (800x)     |
+   |                                |       |  Salva no array leiturasV[0]    |
+   |                                |       |  Avança para CAL_100            |
+   |                                |       |  Envia via BLE: "COLOQUE_100_NTU"
+   |                                |       +---------------------------------+
+   |                                |                       |
+   |               :                |                       :
+   |    [ Repete o mesmo processo   |            [ Repete o mesmo processo    |
+   |      para 100, 200, 300, 400 ] |              para 100, 200, 300, 400 ]  |
+   |               :                |                       :
+   |                                |                       |
+   |  3. Insere o Frasco de 500 NTU |       +---------------------------------+
+   |     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
+   |                                |       |  Mede Voltagem Média (800x)     |
+   |                                |       |  Salva no array leiturasV[5]    |
+   |                                |       |  Avança para PROCESSAR          |
+   |                                |       +---------------------------------+
+   |                                |                       |
+   |                                |                       v
+   |                                |       +---------------------------------+
+   |                                |       |  FUNÇÃO calcularNovaCurva()     |
+   |                                |       |  - Executa Mínimos Quadrados    |
+   |  4. Recebe o feedback na tela  |       |  - Aplica Regra de Cramer       |
+   |     "Calibração Concluída!"    |<------|  - Salva a, b, c na Flash (NVS) |
+   |                                |       |  - Retorna estadoAtual para IDLE|
+   +--------------------------------+       +---------------------------------+
+                                                            |
+                                                            v
+                                            [ Retoma Medição Normal de NTU ]
