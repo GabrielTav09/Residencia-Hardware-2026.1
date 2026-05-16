@@ -30,10 +30,10 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 ## 🔧 Configuração e Instalação
 
 1.  **Instalação da Placa:**
-    * No Gerenciador de Placas (`Boards Manager`), certifique-se de ter o pacote **`esp32 by Espressif Systems`** instalado (versão 3.3.8 testada) e **`Arduino AVR Boards`** .
+    * No Gerenciador de Placas (`Boards Manager`), certifique-se de ter o pacote **`esp32 by Espressif Systems`** instalado **(versão 3.3.8 testada)** e **`Arduino AVR Boards`** instalado **(versão 1.8.7 testada)**.
 2.  **Instalação da Biblioteca:**
     * Vá na `Lateral direita` > `Include Library` > `Manage Libraries...`
-    * Procure por **ArduinoJson** e instale a versão **`7.4.1`**
+    * Procure por **`ArduinoJson`** e instale a versão **`7.4.1`**
 3.  **Upload do Código:**
     * Conecte seu ESP32 via USB.
     * Selecione a placa `ESP32 Dev Module`.
