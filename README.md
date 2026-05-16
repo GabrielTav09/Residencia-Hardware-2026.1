@@ -51,48 +51,45 @@ Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 ***Fluxograma de funcionamento da calibração** 
 
 ```mermaid
-graph TD
-    %% Estilos de Cores
-    classDef usuario fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
-    classDef software fill:#efebe9,stroke:#5d4037,stroke-width:2px;
-    classDef processo fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Usuario as 📱 USUÁRIO / APLICATIVO (Front-end)
+    participant ESP32 as ⚙️ SOFTWARE / ESP32 (Firmware)
 
-    subgraph "AÇÕES DO USUÁRIO (Front-end)"
-        A[1. Clica em 'START_CAL']:::usuario
-        C[2. Insere Frasco de 0 NTU e clica em 'CONFIRM_STEP']:::usuario
-        E[3. Repete o processo para os frascos de 100 a 400 NTU]:::usuario
-        G[4. Insere Frasco de 500 NTU e clica em 'CONFIRM_STEP']:::usuario
-        I[5. Recebe feedback de sucesso 'CALIB_OK']:::usuario
+    Note over Usuario, ESP32: Início do Processo de Calibração
+    Usuario->>ESP32: Clica em "START_CAL"
+    Note over ESP32: Para medições normais de NTU
+    ESP32-->>Usuario: Muda para CAL_0 & Envia: "COLOQUE_0_NTU"
+
+    rect rgb(240, 248, 255)
+        Note over Usuario, ESP32: Ciclo de Coleta de Amostras (Passo a Passo)
+        Usuario->>ESP32: Insere Frasco de 0 NTU e clica em "CONFIRM_STEP"
+        Note over ESP32: Executa Filtro de Ruído:<br/>Mede Voltagem Média (800x)
+        Note over ESP32: Salva no array leiturasV[0]
+        ESP32-->>Usuario: Avança estado & Envia: "COLOQUE_100_NTU"
     end
 
-    subgraph "RESPOSTAS DO SOFTWARE (ESP32)"
-        B[Muda para CAL_0 <br> Envia via BLE: 'COLOQUE_0_NTU']:::software
-        D[Mede Voltagem Média 800x <br> Salva no array leiturasV <br> Pede próximo frasco]:::software
-        F[Aguarda interações do usuário]:::software
-        H[Coleta última voltagem <br> Muda para estado PROCESSAR]:::software
-        
-        subgraph P1 [REGRESSÃO POLINOMIAL DE 2º GRAU]
-            J[1. MÍNIMOS QUADRADOS <br> Executa laço para montar matriz de erros]:::processo
-            K[2. REGRA DE CRAMER <br> Resolve determinantes e encontra a, b, c]:::processo
-        end
-        
-        L[Grava coeficientes na Flash <br> Retorna para estado IDLE]:::software
-        M[Retoma Medição Normal de NTU]:::software
+    Note over Usuario, ESP32: : <br/> Repete o mesmo processo exato para os frascos de 100 NTU, 200 NTU, 300 NTU e 400 NTU <br/> :
+
+    rect rgb(240, 248, 255)
+        Usuario->>ESP32: Insere Frasco de 500 NTU e clica em "CONFIRM_STEP"
+        Note over ESP32: Mede Voltagem Média (800x)
+        Note over ESP32: Salva no array leiturasV[5]
+        Note over ESP32: Avança para o estado: PROCESSAR
     end
 
-    %% Conexões do Fluxo
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    G --> H
-    H --> J
-    J --> K
-    K --> L
-    L --> I
-    L --> M
+    critical Regressão Polinomial de 2º Grau (Função calcularNovaCurva)
+        Note over ESP32: 1. MÍNIMOS QUADRADOS<br/>Executa somatórios matemáticos e monta a matriz
+        Note over ESP32: 2. REGRA DE CRAMER<br/>Resolve determinantes e isola os coeficientes (a, b, c)
+        Note over ESP32: 3. MEMÓRIA FLASH (NVS)<br/>Salva coeficientes permanentemente via Preferences
+    end
+
+    Note over ESP32: Força estadoAtual = IDLE
+    ESP32-->>Usuario: Envia feedback final: "CALIB_OK"
+    Note over Usuario: Tela exibe: "Calibração Concluída!"
+
+    Note over ESP32: [ Loop Principal Destravado ]<br/>Retoma Medição Normal de NTU para a Caranha
 ````
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
