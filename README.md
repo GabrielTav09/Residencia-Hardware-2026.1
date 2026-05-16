@@ -50,40 +50,72 @@ Desenvolvido como parte da documentação de Hardware da Residência 2026/1.
 
 ***Fluxograma de funcionamento da calibração** 
 
-   **USUÁRIO / APLICATIVO (Front-end)**       **SOFTWARE / ESP32 (Firmware)**
-   +--------------------------------+       +---------------------------------+
-   |                                |       |                                 |
-   |  1. Clica em "START_CAL"       |------>|  Muda estadoAtual para CAL_0    |
-   |                                |       |  Envia via BLE: "COLOQUE_0_NTU" |
-   |                                |       +---------------------------------+
-   |  2. Insere o Frasco de 0 NTU   |                       |
-   |     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
-   |                                |       |  Mede Voltagem Média (800x)     |
-   |                                |       |  Salva no array leiturasV[0]    |
-   |                                |       |  Avança para CAL_100            |
-   |                                |       |  Envia via BLE: "COLOQUE_100_NTU"
-   |                                |       +---------------------------------+
-   |                                |                       |
-   |               :                |                       :
-   |    [ Repete o mesmo processo   |            [ Repete o mesmo processo    |
-   |      para 100, 200, 300, 400 ] |              para 100, 200, 300, 400 ]  |
-   |               :                |                       :
-   |                                |                       |
-   |  3. Insere o Frasco de 500 NTU |       +---------------------------------+
-   |     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
-   |                                |       |  Mede Voltagem Média (800x)     |
-   |                                |       |  Salva no array leiturasV[5]    |
-   |                                |       |  Avança para PROCESSAR          |
-   |                                |       +---------------------------------+
-   |                                |                       |
-   |                                |                       v
-   |                                |       +---------------------------------+
-   |                                |       |  FUNÇÃO calcularNovaCurva()     |
-   |                                |       |  - Executa Mínimos Quadrados    |
-   |  4. Recebe o feedback na tela  |       |  - Aplica Regra de Cramer       |
-   |     "Calibração Concluída!"    |<------|  - Salva a, b, c na Flash (NVS) |
-   |                                |       |  - Retorna estadoAtual para IDLE|
-   +--------------------------------+       +---------------------------------+
-                                                            |
-                                                            v
-                                            [ Retoma Medição Normal de NTU ]
+USUÁRIO / APLICATIVO (Front-end)         SOFTWARE / ESP32 (Firmware)
++--------------------------------+       +---------------------------------+
+|                                |       |                                 |
+|  1. Clica em "START_CAL"       |------>|  Muda estadoAtual para CAL_0    |
+|                                |       |  Envia via BLE: "COLOQUE_0_NTU" |
+|                                |       +---------------------------------+
+|  2. Insere o Frasco de 0 NTU   |                       |
+|     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
+|                                |       |  Mede Voltagem Média (800x)     |
+|                                |       |  Salva no array leiturasV[0]    |
+|                                |       |  Avança para CAL_100            |
+|                                |       |  Envia via BLE: "COLOQUE_100_NTU"
+|                                |       +---------------------------------+
+|                                |                       |
+|               :                |                       :
+|    [ Repete o mesmo processo   |            [ Repete o mesmo processo    |
+|      para 100, 200, 300, 400 ] |              para 100, 200, 300, 400 ]  |
+|               :                |                       :
+|                                |                       |
+|  3. Insere o Frasco de 500 NTU |       +---------------------------------+
+|     e clica em "CONFIRM_STEP"  |------>|  Recebe CONFIRM_STEP            |
+|                                |       |  Mede Voltagem Média (800x)     |
+|                                |       |  Salva no array leiturasV[5]    |
+|                                |       |  Avança para PROCESSAR          |
+|                                |       +---------------------------------+
+|                                |                       |
+|                                |                       v
+|                                |       +---------------------------------+
+|                                |       |  REGRESSÃO POLINOMIAL (2º Grau) |
+|                                |       |  - Método dos Mínimos Quadrados |
+|  4. Recebe o feedback na tela  |       |  - Resolução por Regra de Cramer|
+|     "Calibração Concluída!"    |<------|  - Grava coeficientes na Flash  |
+|                                |       |  - Retorna estadoAtual para IDLE|
++--------------------------------+       +---------------------------------+
+|
+v
+[ Retoma Medição Normal de NTU ]
+
+
+## 🛠️ Especificação de Integração (API Bluetooth BLE)
+
+Para o desenvolvimento e acoplamento do aplicativo móvel, o Front-end deve interagir estritamente com os seguintes comandos de envio e estruturas de recebimento na característica de comunicação NUS.
+
+### 1. Comandos de Envio (Botões do Front-end para o ESP32)
+Devem ser enviados como strings de texto puro para a característica **RX** do serviço BLE.
+
+* `START_CAL`: Aciona ou aborta o modo de calibração. Se o sistema estiver em operação normal (`IDLE`), limpa as variáveis e inicia o passo a passo mudando para `CAL_0`. Se enviado com a calibração em andamento, funciona como um botão de **Cancelar**, forçando o retorno imediato ao monitoramento normal com os coeficientes antigos.
+* `CONFIRM_STEP`: Funciona como um botão de **Avançar / Confirmar**. Deve ser pressionado pelo utilizador após posicionar fisicamente o frasco de calibração solicitado na fenda do sensor. Liberta o ESP32 para colher as 800 amostras daquele ponto.
+* `GET_TURBIDEZ`: Força uma requisição manual de leitura. O ESP32 responderá instantaneamente enviando o JSON de medição. *Nota: Este comando é automaticamente ignorado pelo ESP32 caso a máquina de estados de calibração esteja ativa.*
+
+### 2. Mensagens de Notificação de Estado (ESP32 para o Front-end)
+Enviadas como strings de texto puro pela característica **TX** do serviço BLE para orientar dinamicamente a interface do utilizador.
+
+* `COLOQUE_0_NTU`: Exibir instrução em ecrã para o utilizador inserir o primeiro líquido de calibração (0 NTU) e expor o botão de confirmação.
+* `LENDO...`: Emitido assim que o utilizador clica em confirmar. O Front-end deve exibir um feedback visual de carregamento (*spinner*) e bloquear interações para evitar cliques duplos durante as 800 leituras.
+* `COLOQUE_100_NTU` a `COLOQUE_500_NTU`: Instruções sequenciais para a troca física dos frascos de referência padrão.
+* `PROCESSANDO...`: Indica que a amostragem terminou e os cálculos matemáticos da Regressão Polinomial estão a ser processados pelo núcleo do ESP32.
+* `CALIB_OK`: Notificação de sucesso. O Front-end deve fechar a interface de calibração, exibir uma mensagem de êxito e redirecionar o utilizador para o painel principal de monitoramento.
+* `CALIB_CANCELADA`: Confirmação de interrupção. Disparado quando o utilizador cancela o processo a meio.
+
+### 3. Pacote de Dados de Monitorização (Modo Normal)
+Quando o sistema se encontra no estado `IDLE` (Operação de Rotina), o ESP32 transmite autonomamente a cada **2 segundos** um pacote formatado em **JSON** contendo as seguintes variáveis:
+
+```json
+{
+  "turbidez": 42.15,
+  "nivel": "Boa para o peixe caranha (pouco turva)",
+  "timestamp": 124500
+}
