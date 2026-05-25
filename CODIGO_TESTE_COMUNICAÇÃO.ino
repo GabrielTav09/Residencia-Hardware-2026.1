@@ -208,7 +208,7 @@ void setup() {
 
 void loop() {
 
-  // --- MODO CALIBRAÇÃO ---COLOQUe
+  // --- MODO CALIBRAÇÃO ---
   if (estadoAtual != IDLE) {
     if (estadoAtual >= CAL_0 && estadoAtual <= CAL_500) {
       if (confirmarLeitura) {
