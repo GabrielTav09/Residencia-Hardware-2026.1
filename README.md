@@ -66,7 +66,7 @@ Estes comandos devem ser enviados como strings de texto puro para a característ
 * `CONFIRM`: Funciona como o comando de **Avançar / Confirmar**. Deve ser enviado pelo Front-end após o utilizador posicionar fisicamente o frasco com o líquido de referência na fenda do sensor e clicar para validar, autorizando o ESP32 a capturar o ponto atual e avançar para o próximo.
 * `GET_TURBIDEZ`: Solicita manualmente uma leitura de medição instantânea. O ESP32 responderá enviando o JSON com os dados de turbidez. *Nota: Este comando gerará um erro se enviado enquanto uma calibração estiver ativa.*
 
-# ⤵ 2. Mensagens de Notificação de Estado e Erros (ESP32 para o Front-end)
+### ⤵ 2. Mensagens de Notificação de Estado e Erros (ESP32 para o Front-end)
 Enviadas como strings de texto puro pela característica **TX** do serviço BLE para orientar dinamicamente a interface do utilizador e tratar exceções.
 
 ### A. Fluxo de Calibração e Estados normais
