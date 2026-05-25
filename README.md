@@ -59,22 +59,33 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 
 Para o desenvolvimento e acoplamento do aplicativo móvel, o Front-end deve interagir estritamente com os seguintes comandos de envio e estruturas de recebimento na característica de comunicação NUS.
 
-### 1. Comandos de Envio (Botões do Front-end para o ESP32)
-Devem ser enviados como strings de texto puro para a característica **RX** do serviço BLE.
+### ⤴ 1. Comandos de Envio (Botões do Front-end para o ESP32)
+Estes comandos devem ser enviados como strings de texto puro para a característica **RX** do serviço BLE.
 
-* `START_CAL`: Aciona ou aborta o modo de calibração. Se o sistema estiver em operação normal (`IDLE`), limpa as variáveis e inicia o passo a passo mudando para `CAL_0`. Se enviado com a calibração em andamento, funciona como um botão de **Cancelar**, forçando o retorno imediato ao monitoramento normal com os coeficientes antigos.
-* `CONFIRM_STEP`: Funciona como um botão de **Avançar / Confirmar**. Deve ser pressionado pelo utilizador após posicionar fisicamente o frasco de calibração solicitado na fenda do sensor. Liberta o ESP32 para colher as 800 amostras daquele ponto.
-* `GET_TURBIDEZ`: Força uma requisição manual de leitura. O ESP32 responderá instantaneamente enviando o JSON de medição. *Nota: Este comando é automaticamente ignorado pelo ESP32 caso a máquina de estados de calibração esteja ativa.*
+* `START_CAL`: Inicia o processo de calibração (caso o sistema esteja em modo de operação normal `IDLE`) ou cancela imediatamente o processo atual se ele já estiver em curso (forçando o retorno ao monitoramento e restaurando as configurações anteriores).
+* `CONFIRM`: Funciona como o comando de **Avançar / Confirmar**. Deve ser enviado pelo Front-end após o utilizador posicionar fisicamente o frasco com o líquido de referência na fenda do sensor e clicar para validar, autorizando o ESP32 a capturar o ponto atual e avançar para o próximo.
+* `GET_TURBIDEZ`: Solicita manualmente uma leitura de medição instantânea. O ESP32 responderá enviando o JSON com os dados de turbidez. *Nota: Este comando gerará um erro se enviado enquanto uma calibração estiver ativa.*
 
-### 2. Mensagens de Notificação de Estado (ESP32 para o Front-end)
-Enviadas como strings de texto puro pela característica **TX** do serviço BLE para orientar dinamicamente a interface do utilizador.
+# ⤵ 2. Mensagens de Notificação de Estado e Erros (ESP32 para o Front-end)
+Enviadas como strings de texto puro pela característica **TX** do serviço BLE para orientar dinamicamente a interface do utilizador e tratar exceções.
 
-* `COLOQUE_0_NTU`: Exibir instrução em ecrã para o utilizador inserir o primeiro líquido de calibração (0 NTU) e expor o botão de confirmação.
-* `LENDO...`: Emitido assim que o utilizador clica em confirmar. O Front-end deve exibir um feedback visual de carregamento (*spinner*) e bloquear interações para evitar cliques duplos durante as 800 leituras.
-* `COLOQUE_100_NTU` a `COLOQUE_500_NTU`: Instruções sequenciais para a troca física dos frascos de referência padrão.
-* `PROCESSANDO...`: Indica que a amostragem terminou e os cálculos matemáticos da Regressão Polinomial estão a ser processados pelo núcleo do ESP32.
-* `CALIB_OK`: Notificação de sucesso. O Front-end deve fechar a interface de calibração, exibir uma mensagem de êxito e redirecionar o utilizador para o painel principal de monitoramento.
-* `CALIB_CANCELADA`: Confirmação de interrupção. Disparado quando o utilizador cancela o processo a meio.
+### A. Fluxo de Calibração e Estados normais
+* `0_NTU`: Indica o início do ciclo de calibração e sinaliza para a interface instruir o utilizador a inserir o líquido de calibração padrão de 0 NTU.
+* `100_NTU`: Solicita a troca física do frasco para a referência de 100 NTU.
+* `200_NTU`: Solicita a troca física do frasco para a referência de 200 NTU.
+* `300_NTU`: Solicita a troca física do frasco para a referência de 300 NTU.
+* `400_NTU`: Solicita a troca física do frasco para a referência de 400 NTU.
+* `500_NTU`: Solicita a troca física do frasco para a última referência de 500 NTU.
+* `LENDO`: Emitido no momento exato em que o ESP32 realiza a captura de amostras de um ponto. O Front-end deve exibir um feedback visual de carregamento (*spinner*) e bloquear interações para evitar cliques duplos.
+* `PROCESSANDO`: Enviado logo após o último ponto (500 NTU) ser confirmado, indicando que a amostragem acabou e o núcleo do ESP32 está a processar os cálculos matemáticos da Regressão Polinomial.
+* `CALIB_OK`: Notificação enviada quando a calibração é concluída com sucesso. A interface do Front-end deve exibir uma mensagem de êxito e redirecionar o utilizador para o painel principal de monitoramento.
+* `CALIB_CANCELADA`: Confirmação de interrupção, enviada pelo hardware quando o processo é cancelado a meio devido ao recebimento de um segundo comando `START_CAL`.
+
+### B. Mensagens de Erro
+* `ERRO_EM_CALIB`: Retornado pelo ESP32 caso o Front-end envie o comando `GET_TURBIDEZ` enquanto o sistema estiver no meio do processo de calibração. A requisição de leitura manual é ignorada para não corromper o estado do hardware.
+* `ERRO_AMOSTRAGEM`: Emitido se o hardware detetar uma falha crítica ou leitura inconsistente do sensor de turbidez durante a coleta das amostras de um dos pontos. O Front-end deve alertar o utilizador para verificar a posição do frasco ou o sensor.
+* `ERRO_MATEMATICO`: Enviado durante a fase `PROCESSANDO` caso os dados coletados gerem uma matriz singular ou inconsistente que impossibilite o cálculo dos coeficientes da regressão polinomial. Indica que a calibração falhou e os coeficientes antigos foram mantidos.
+
 
 ### 3. Pacote de Dados de Monitorização (Modo Normal)
 Quando o sistema se encontra no estado `IDLE` (Operação de Rotina), o ESP32 transmite autonomamente a cada **2 segundos** um pacote formatado em **JSON** contendo as seguintes variáveis:
