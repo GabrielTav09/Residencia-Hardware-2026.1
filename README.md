@@ -52,12 +52,14 @@ Para o correto funcionamento do código, é necessário instalar as seguintes de
 
 
 ## 📝Fluxograma de funcionamento da calibração** 
-`Link do documento contendo o fluxograma:` https://docs.google.com/document/d/1QTFS1HhQR8ck_HtCRx5Kt2yM3TgcG6MsAOZ4cucw9zI/edit?usp=sharing
+`Link do documento contendo o fluxograma:` https://miro.com/app/board/uXjVHRYVJZc=/?share_link_id=602356522690
+
 
 
 ## 🛠️ Especificação de Integração (API Bluetooth BLE)
 
 Para o desenvolvimento e acoplamento do aplicativo móvel, o Front-end deve interagir estritamente com os seguintes comandos de envio e estruturas de recebimento na característica de comunicação NUS.
+Link de um documentos: https://docs.google.com/document/d/1QTFS1HhQR8ck_HtCRx5Kt2yM3TgcG6MsAOZ4cucw9zI/edit?usp=sharing
 
 ### ⤴ 1. Comandos de Envio (Botões do Front-end para o ESP32)
 Estes comandos devem ser enviados como strings de texto puro para a característica **RX** do serviço BLE.
