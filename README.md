@@ -84,9 +84,9 @@ Enviadas como strings de texto puro pela característica **TX** do serviço BLE 
 * `CALIB_CANCELADA`: Confirmação de interrupção, enviada pelo hardware quando o processo é cancelado a meio devido ao recebimento de um segundo comando `START_CAL`.
 
 ### B. Mensagens de Erro
-* `ERRO_CONFIRM_FORA_DE_CONTEXTO`: O usuário aperta "confirmar" no app antes de ter iniciado a calibração com START_CAL, o usuário aperta "confirmar" uma 7ª vez depois que todos os 6 pontos já foram coletados (quando o estado já virou PROCESSAR) ou o app reconectou e reenviou um CONFIRM_STEP que estava em buffer
-* `ERRO_EM_CALIBRACAO`: O usuário está no meio de uma calibração e outra tela do app tenta puxar uma leitura normal ao mesmo tempo ou o app tem um timer automático de GET_TURBIDEZ que não foi pausado ao entrar no fluxo de calibração
-* `ERRO_CMD_DESCONHECIDO:xyz`: Erro de digitação no Frontend, como start_cal (minúsculo) ou STARTCAL sem underscore. Problema de encoding enviando caracteres extras, como START_CAL\n ou START_CAL\r\n — o \n quebra a comparação
+* `FORA_DE_CONT`: O usuário aperta "confirmar" no app antes de ter iniciado a calibração com START_CAL, o usuário aperta "confirmar" uma 7ª vez depois que todos os 6 pontos já foram coletados (quando o estado já virou PROCESSAR) ou o app reconectou e reenviou um CONFIRM_STEP que estava em buffer
+* `ERRO_CALIB`: O usuário está no meio de uma calibração e outra tela do app tenta puxar uma leitura normal ao mesmo tempo ou o app tem um timer automático de GET_TURBIDEZ que não foi pausado ao entrar no fluxo de calibração
+* `ERRO_DESCONHECIDO:xyz`: Erro de digitação no Frontend, como start_cal (minúsculo) ou STARTCAL sem underscore. Problema de encoding enviando caracteres extras, como START_CAL\n ou START_CAL\r\n — o \n quebra a comparação
 
 ### 3. Pacote de Dados de Monitorização (Modo Normal)
 Quando o sistema se encontra no estado `IDLE` (Operação de Rotina), o ESP32 transmite autonomamente a cada **2 segundos** um pacote formatado em **JSON** contendo as seguintes variáveis:
