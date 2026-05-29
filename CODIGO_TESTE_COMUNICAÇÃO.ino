@@ -28,6 +28,10 @@ const float valoresNTU[] = {0, 100, 200, 300, 400, 500};
 unsigned long ultimoEnvio = 0;
 const unsigned long INTERVALO_MS = 10000; // 10 segundos
 
+// --- Controle de inatividade na calibração ---
+unsigned long ultimaInteracao  = 0;
+const unsigned long TIMEOUT_MS = 90000; // 1 minuto e 30 segundos
+
 // =============================================================================
 // COMUNICAÇÃO
 // =============================================================================
@@ -46,11 +50,10 @@ void enviarMensagemBLE(String msg) {
 
 // =============================================================================
 // LEITURA REAL DE TENSÃO
-// Mantida conforme solicitado.
 //
 // PONTO CRÍTICO #1 — BLOQUEIO DE 800ms
 // Esta função bloqueia o loop() por ~800ms (800 leituras × 1ms).
-// Se um comando BLE (START_CAL, CONFIRM_STEP) chegar nesse janela,
+// Se um comando BLE (START_CAL, CONFIRM) chegar nessa janela,
 // o callback onWrite() aguarda na fila do stack BLE e só executa
 // depois que lerVoltagemPura() retornar. Em situações normais não
 // causa desconexão, mas atrasa a resposta ao Frontend em até 800ms.
@@ -69,22 +72,37 @@ float lerVoltagemPura() {
 
 // =============================================================================
 // JSON DE MONITORAMENTO
-// Envia a tensão bruta e NTU como 0.0 (sem calibração neste teste).
-// O Frontend pode validar se está recebendo o JSON corretamente.
 // =============================================================================
 
 String criarJsonTurbidez() {
   float voltagem = lerVoltagemPura();
 
   StaticJsonDocument<200> json;
-  json["turbidez"] = 0.0;           // Sem cálculo — teste de protocolo apenas
-  json["tensao"]   = voltagem;      // Valor real do sensor para validar hardware
-  json["nivel"]    = "MODO_TESTE";
+  json["turbidez"]  = 0.0;
+  json["tensao"]    = voltagem;
+  json["nivel"]     = "MODO_TESTE";
   json["timestamp"] = millis();
 
   String resposta;
   serializeJson(json, resposta);
   return resposta;
+}
+
+// =============================================================================
+// INATIVIDADE — Encerra calibração automaticamente após 1min30s sem interação
+// Interações que resetam o timer: CONFIRM e START_CAL
+// Retorna ao estado IDLE e notifica o Frontend com "INATIV"
+// =============================================================================
+
+void verificarInatividade() {
+  if (estadoAtual == IDLE) return; // Só monitora durante calibração
+
+  if (millis() - ultimaInteracao >= TIMEOUT_MS) {
+    estadoAtual      = IDLE;
+    confirmarLeitura = false;
+    enviarMensagemBLE("INATIV");
+    Serial.println("[INATIV] Calibracao encerrada por inatividade (1min30s).");
+  }
 }
 
 // =============================================================================
@@ -104,30 +122,29 @@ class MyServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *pServer) override {
     deviceConnected = false;
     Serial.println("[BLE] Desconectado. Reiniciando advertising...");
-    delay(500); // <- Necessário em alguns firmwares do ESP32
+    delay(500);
     pServer->getAdvertising()->start();
   }
 };
 
 // PONTO CRÍTICO #3 — CALLBACK RODA NA TASK BLE
 // Nunca chame lerVoltagemPura() diretamente aqui.
-// Use apenas flags (confirmarLeitura = true) e deixe o loop() processar.
-// O código abaixo está correto — este aviso é para manutenção futura.
+// Use apenas flags e deixe o loop() processar.
 //
 // PONTO CRÍTICO #4 — STRINGS VAZIAS
 // Alguns dispositivos Android enviam uma escrita vazia antes do comando real.
-// O if (rxValue.length() == 0) return; protege contra isso.
 
 class MyCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) override {
     String rxValue = pCharacteristic->getValue();
 
-    if (rxValue.length() == 0) return; // Ignora escritas vazias
+    if (rxValue.length() == 0) return;
 
     Serial.print("[RX] ");
     Serial.println(rxValue);
 
     if (rxValue == "START_CAL") {
+      ultimaInteracao = millis(); // Reseta o timer de inatividade
       if (estadoAtual == IDLE) {
         estadoAtual      = CAL_0;
         confirmarLeitura = false;
@@ -140,13 +157,10 @@ class MyCallbacks : public BLECharacteristicCallbacks {
     }
     else if (rxValue == "CONFIRM") {
       if (estadoAtual != IDLE && estadoAtual != PROCESSAR) {
+        ultimaInteracao  = millis(); // Reseta o timer de inatividade
         confirmarLeitura = true;
-        // Não responde aqui — o loop() processa e envia a próxima mensagem
       } else {
-        // PONTO CRÍTICO #5 — CONFIRM fora de contexto
-        // Sem este aviso, o Frontend pode ficar travado esperando uma resposta
-        // que nunca vem, pois confirmarLeitura é ignorado quando IDLE.
-        enviarMensagemBLE("ERRO_CONFIRM_FORA_DE_CONTEXTO");
+        enviarMensagemBLE("FORA_DE_CONT");
       }
     }
     else if (rxValue == "GET_TURBIDEZ") {
@@ -157,13 +171,11 @@ class MyCallbacks : public BLECharacteristicCallbacks {
         Serial.print("[TX] ");
         Serial.println(jsonData);
       } else {
-        enviarMensagemBLE("ERRO_EM_CALIB");
+        enviarMensagemBLE("ERRO_CALIB");
       }
     }
     else {
-      // PONTO CRÍTICO #6 — Eco de comandos desconhecidos
-      // Ajuda a detectar erros de digitação ou encoding no Frontend.
-      enviarMensagemBLE("ERRO_CMD_DESCONHECIDO:" + rxValue);
+      enviarMensagemBLE("ERRO_DESCONHECIDO:" + rxValue);
     }
   }
 };
@@ -208,6 +220,9 @@ void setup() {
 
 void loop() {
 
+  // --- VERIFICA INATIVIDADE (roda sempre, bloqueia só durante calibração) ---
+  verificarInatividade();
+
   // --- MODO CALIBRAÇÃO ---
   if (estadoAtual != IDLE) {
     if (estadoAtual >= CAL_0 && estadoAtual <= CAL_500) {
@@ -215,7 +230,7 @@ void loop() {
         int idx = (int)estadoAtual - 1;
 
         enviarMensagemBLE("LENDO");
-        float tensao = lerVoltagemPura(); // Leitura real, apenas para log
+        float tensao = lerVoltagemPura();
 
         Serial.print("[CAL] Ponto ");
         Serial.print(idx);
@@ -234,19 +249,18 @@ void loop() {
     else if (estadoAtual == PROCESSAR) {
       enviarMensagemBLE("PROCESSANDO");
       delay(300);
-      enviarMensagemBLE("CALIB_OK"); // Sem cálculo real neste teste
+      enviarMensagemBLE("CALIB_OK");
       Serial.println("[CAL] Concluida (sem calculo - modo teste).");
       estadoAtual = IDLE;
     }
   }
 
-  // --- MODO MONITORAMENTO (10 em 10 segundos, sem delay bloqueante) ---
+  // --- MODO MONITORAMENTO ---
   else {
     if (deviceConnected) {
       unsigned long agora = millis();
       if (agora - ultimoEnvio >= INTERVALO_MS) {
         ultimoEnvio = agora;
-        // ATENÇÃO: lerVoltagemPura() bloqueia ~800ms — ver Ponto Crítico #1
         String jsonData = criarJsonTurbidez();
         pTxCharacteristic->setValue(jsonData.c_str());
         pTxCharacteristic->notify();
