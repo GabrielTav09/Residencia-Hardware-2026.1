@@ -395,17 +395,22 @@ void loop() {
   }
 
   // --- MODO MONITORAMENTO (10 em 10 segundos, sem delay bloqueante) ---
-  else {
-    if (deviceConnected) {
+    else {
       unsigned long agora = millis();
       if (agora - ultimoEnvio >= INTERVALO_MS) {
         ultimoEnvio = agora;
         String jsonData = criarJsonTurbidez();
-        pTxCharacteristic->setValue(jsonData.c_str());
-        pTxCharacteristic->notify();
+      
+        // Envia via BLE APENAS se estiver conectado
+        if (deviceConnected) {
+         pTxCharacteristic->setValue(jsonData.c_str());
+         pTxCharacteristic->notify();
+       }
+      
+       // Imprime no Monitor Serial SEMPRE (conectado ou não)
         Serial.print("[MONITOR] ");
-        Serial.println(jsonData);
+       Serial.println(jsonData);
       }
-    }
+   }
   }
 }
