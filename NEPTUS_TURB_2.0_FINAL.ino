@@ -75,6 +75,8 @@ float lerVoltagemPura() {
     delay(1);
   }
   voltagem /= 800.0;
+  Serial.print("Média da Tensão: ");
+  Serial.println(voltagem);
   return voltagem * (5.0 / 3.3); // Converte para escala do sensor (5V)
 }
 
