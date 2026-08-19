@@ -25,6 +25,9 @@ Preferences preferences;
 // --- Coeficientes da fórmula NTU = ax² + bx + c ---
 float coefA, coefB, coefC;
 
+// --- Variável global para exibir a última voltagem medida ---
+float ultimaVoltagemLida = 0.0;
+
 // --- Máquina de estados ---
 enum EstadoCalib { IDLE, CAL_0, CAL_100, CAL_200, CAL_300, CAL_400, CAL_500, PROCESSAR };
 EstadoCalib estadoAtual = IDLE;
@@ -41,31 +44,23 @@ unsigned long ultimaInteracao  = 0;
 const unsigned long TIMEOUT_MS = 90000; // 1 minuto e 30 segundos
 
 // =============================================================================
-// COMUNICAÇÃO
+// COMUNICAÇÃO BLE
 // =============================================================================
 
 void enviarMensagemBLE(String msg) {
   if (deviceConnected) {
     pTxCharacteristic->setValue(msg.c_str());
     pTxCharacteristic->notify();
-    Serial.print("[TX] ");
+    Serial.print("[BLE TX] ");
     Serial.println(msg);
   } else {
-    Serial.print("[TX ignorado - sem conexao] ");
+    Serial.print("[BLE TX ignorado - sem conexao] ");
     Serial.println(msg);
   }
 }
 
 // =============================================================================
 // LEITURA REAL DE TENSÃO
-//
-// PONTO CRÍTICO #1 — BLOQUEIO DE 800ms
-// Esta função bloqueia o loop() por ~800ms (800 leituras × 1ms).
-// Se um comando BLE (START_CAL, CONFIRM) chegar nessa janela,
-// o callback onWrite() aguarda na fila do stack BLE e só executa
-// depois que lerVoltagemPura() retornar. Em situações normais não
-// causa desconexão, mas atrasa a resposta ao Frontend em até 800ms.
-// SOLUÇÃO FUTURA: substituir delay(1) por leituras acumuladas via millis().
 // =============================================================================
 
 float lerVoltagemPura() {
@@ -75,13 +70,19 @@ float lerVoltagemPura() {
     delay(1);
   }
   voltagem /= 800.0;
-  Serial.print("Média da Tensão: ");
-  Serial.println(voltagem);
-  return voltagem * (5.0 / 3.3); // Converte para escala do sensor (5V)
+  
+  // Converte para escala do sensor (5V) e armazena na global
+  ultimaVoltagemLida = voltagem * (5.0 / 3.3); 
+  
+  Serial.print("[SENSOR] Tensao medida: ");
+  Serial.print(ultimaVoltagemLida, 4);
+  Serial.println(" V");
+  
+  return ultimaVoltagemLida;
 }
 
 // =============================================================================
-// CÁLCULO NTU — Converte tensão para turbidez usando a fórmula calibrada
+// CÁLCULO NTU
 // =============================================================================
 
 float lerTurbidez() {
@@ -98,7 +99,7 @@ float lerTurbidez() {
 }
 
 // =============================================================================
-// CLASSIFICAÇÃO — Traduz NTU em qualidade da água
+// CLASSIFICAÇÃO
 // =============================================================================
 
 String classificarTurbidez(float ntu) {
@@ -108,14 +109,16 @@ String classificarTurbidez(float ntu) {
 }
 
 // =============================================================================
-// JSON DE MONITORAMENTO — Envia leitura real calibrada ao Frontend
+// JSON DE MONITORAMENTO
 // =============================================================================
 
 String criarJsonTurbidez() {
-  float turbidez = lerTurbidez();
+  float turbidez = lerTurbidez(); // Isso atualiza 'ultimaVoltagemLida' internamente
   String nivel   = classificarTurbidez(turbidez);
 
-  StaticJsonDocument<200> json;
+  // Aumentado para 256 bytes para comportar a nova variável
+  StaticJsonDocument<256> json; 
+  json["voltagem"]  = ultimaVoltagemLida; // Adicionado conforme solicitado
   json["turbidez"]  = turbidez;
   json["nivel"]     = nivel;
   json["timestamp"] = millis();
@@ -126,9 +129,62 @@ String criarJsonTurbidez() {
 }
 
 // =============================================================================
-// REGRESSÃO POLINOMIAL DE 2º GRAU — Calcula os coeficientes a, b, c
-// Executada após coletar os 6 pontos de calibração (0 a 500 NTU)
-// Salva os coeficientes na memória flash (Preferences) para persistir após reboot
+// PROCESSAMENTO UNIFICADO DE COMANDOS (Bluetooth e Serial)
+// =============================================================================
+
+void processarComando(String cmd) {
+  cmd.trim(); // Limpa espaços ou quebras de linha
+  if (cmd.length() == 0) return;
+
+  Serial.print("\n[COMANDO RECEBIDO] ");
+  Serial.println(cmd);
+
+  if (cmd == "START_CAL") {
+    ultimaInteracao = millis();
+    if (estadoAtual == IDLE) {
+      estadoAtual      = CAL_0;
+      confirmarLeitura = false;
+      enviarMensagemBLE("0_NTU");
+      Serial.println("[STATUS] Calibracao Iniciada. Solicitando 0 NTU.");
+    } else {
+      estadoAtual      = IDLE;
+      confirmarLeitura = false;
+      enviarMensagemBLE("CALIB_CANCELADA");
+      Serial.println("[STATUS] Calibracao Cancelada.");
+    }
+  }
+  else if (cmd == "CONFIRM") {
+    if (estadoAtual != IDLE && estadoAtual != PROCESSAR) {
+      ultimaInteracao  = millis();
+      confirmarLeitura = true;
+      Serial.println("[STATUS] Leitura Confirmada pelo usuario. Processando amostra...");
+    } else {
+      enviarMensagemBLE("FORA_DE_CONT");
+      Serial.println("[ERRO] Comando CONFIRM enviado fora do modo de calibracao.");
+    }
+  }
+  else if (cmd == "GET_TURBIDEZ") {
+    if (estadoAtual == IDLE) {
+      String jsonData = criarJsonTurbidez();
+      if (deviceConnected) {
+        pTxCharacteristic->setValue(jsonData.c_str());
+        pTxCharacteristic->notify();
+      }
+      Serial.print("[RETORNO GET_TURBIDEZ] ");
+      Serial.println(jsonData);
+    } else {
+      enviarMensagemBLE("ERRO_CALIB");
+      Serial.println("[ERRO] Sistema ocupado com calibracao. Nao e possivel ler turbidez agora.");
+    }
+  }
+  else {
+    enviarMensagemBLE("ERRO_DESCONHECIDO:" + cmd);
+    Serial.println("[ERRO] Comando desconhecido -> " + cmd);
+  }
+}
+
+// =============================================================================
+// REGRESSÃO POLINOMIAL DE 2º GRAU
 // =============================================================================
 
 void calcularNovaCurva() {
@@ -164,30 +220,28 @@ void calcularNovaCurva() {
            - sumX * (sumX   * sumX2Y - sumX2  * sumXY)
            + sumY * (sumX   * sumX3  - sumX2  * sumX2)) / det;
 
-    // Salva na memória flash para persistir após reboot
     preferences.begin("turb_cal", false);
     preferences.putFloat("a", coefA);
     preferences.putFloat("b", coefB);
     preferences.putFloat("c", coefC);
     preferences.end();
 
-    Serial.println("[CAL] Novos coeficientes salvos:");
+    Serial.println("\n=============================================");
+    Serial.println("[CAL] SUCESSO! Novos coeficientes calculados:");
     Serial.print("  A = "); Serial.println(coefA, 6);
     Serial.print("  B = "); Serial.println(coefB, 6);
     Serial.print("  C = "); Serial.println(coefC, 6);
+    Serial.println("=============================================\n");
 
     enviarMensagemBLE("CALIB_OK");
   } else {
-    // Determinante zero indica pontos colineares ou leituras inválidas
     Serial.println("[CAL] ERRO: determinante zero. Verifique as amostras.");
     enviarMensagemBLE("CALIB_ERRO");
   }
 }
 
 // =============================================================================
-// INATIVIDADE — Encerra calibração automaticamente após 1min30s sem interação
-// Interações que resetam o timer: CONFIRM e START_CAL
-// Retorna ao estado IDLE e notifica o Frontend com "INATIV"
+// INATIVIDADE
 // =============================================================================
 
 void verificarInatividade() {
@@ -205,15 +259,10 @@ void verificarInatividade() {
 // CALLBACKS BLE
 // =============================================================================
 
-// PONTO CRÍTICO #2 — RECONEXÃO
-// Sem o startAdvertising() manual no onDisconnect, o ESP32 some
-// da lista BLE após a primeira desconexão e o app não o encontra mais.
-// O delay(500) evita falha no startAdvertising() em alguns firmwares.
-
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *pServer) override {
     deviceConnected = true;
-    Serial.println("[BLE] Conectado.");
+    Serial.println("[BLE] Dispositivo Conectado.");
   }
   void onDisconnect(BLEServer *pServer) override {
     deviceConnected = false;
@@ -223,56 +272,10 @@ class MyServerCallbacks : public BLEServerCallbacks {
   }
 };
 
-// PONTO CRÍTICO #3 — CALLBACK RODA NA TASK BLE
-// Nunca chame lerVoltagemPura() diretamente aqui.
-// Use apenas flags e deixe o loop() processar.
-//
-// PONTO CRÍTICO #4 — STRINGS VAZIAS
-// Alguns dispositivos Android enviam uma escrita vazia antes do comando real.
-
 class MyCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) override {
     String rxValue = pCharacteristic->getValue();
-
-    if (rxValue.length() == 0) return;
-
-    Serial.print("[RX] ");
-    Serial.println(rxValue);
-
-    if (rxValue == "START_CAL") {
-      ultimaInteracao = millis();
-      if (estadoAtual == IDLE) {
-        estadoAtual      = CAL_0;
-        confirmarLeitura = false;
-        enviarMensagemBLE("0_NTU");
-      } else {
-        estadoAtual      = IDLE;
-        confirmarLeitura = false;
-        enviarMensagemBLE("CALIB_CANCELADA");
-      }
-    }
-    else if (rxValue == "CONFIRM") {
-      if (estadoAtual != IDLE && estadoAtual != PROCESSAR) {
-        ultimaInteracao  = millis();
-        confirmarLeitura = true;
-      } else {
-        enviarMensagemBLE("FORA_DE_CONT");
-      }
-    }
-    else if (rxValue == "GET_TURBIDEZ") {
-      if (estadoAtual == IDLE) {
-        String jsonData = criarJsonTurbidez();
-        pTxCharacteristic->setValue(jsonData.c_str());
-        pTxCharacteristic->notify();
-        Serial.print("[TX] ");
-        Serial.println(jsonData);
-      } else {
-        enviarMensagemBLE("ERRO_CALIB");
-      }
-    }
-    else {
-      enviarMensagemBLE("ERRO_DESCONHECIDO:" + rxValue);
-    }
+    processarComando(rxValue); // Chama o processador unificado
   }
 };
 
@@ -285,17 +288,17 @@ void setup() {
   pinMode(turbidezPin, INPUT);
   Serial.println("\n=== NEPTUS — SENSOR DE TURBIDEZ BLE ===");
 
-  // Carrega coeficientes salvos ou usa os padrões de fábrica
   preferences.begin("turb_cal", true);
   coefA = preferences.getFloat("a", 2247.5);
   coefB = preferences.getFloat("b", -11038.0);
   coefC = preferences.getFloat("c", 13133.6);
   preferences.end();
 
-  Serial.println("[CAL] Coeficientes carregados:");
+  Serial.println("[MEMORIA] Coeficientes carregados na inicializacao:");
   Serial.print("  A = "); Serial.println(coefA, 6);
   Serial.print("  B = "); Serial.println(coefB, 6);
   Serial.print("  C = "); Serial.println(coefC, 6);
+  Serial.println("=======================================\n");
 
   BLEDevice::init("ESP32-NEPTUS-TURB");
   BLEServer *pServer = BLEDevice::createServer();
@@ -319,7 +322,7 @@ void setup() {
   BLEDevice::getAdvertising()->addServiceUUID(SERVICE_UUID);
   BLEDevice::startAdvertising();
 
-  Serial.println("[BLE] Advertising iniciado.");
+  Serial.println("[BLE] Advertising iniciado. Aguardando conexoes ou comandos via Serial...");
 }
 
 // =============================================================================
@@ -328,7 +331,13 @@ void setup() {
 
 void loop() {
 
-  // --- VERIFICA INATIVIDADE (roda sempre, age só durante calibração) ---
+  // --- VERIFICA COMANDOS VIA TERMINAL SERIAL ---
+  if (Serial.available() > 0) {
+    String comandoSerial = Serial.readStringUntil('\n');
+    processarComando(comandoSerial);
+  }
+
+  // --- VERIFICA INATIVIDADE ---
   verificarInatividade();
 
   // --- MODO CALIBRAÇÃO ---
@@ -338,12 +347,13 @@ void loop() {
         int idx = (int)estadoAtual - 1;
 
         enviarMensagemBLE("LENDO");
-        leiturasV[idx] = lerVoltagemPura(); // Armazena tensão real para o cálculo
+        leiturasV[idx] = lerVoltagemPura(); // Armazena tensão real (já printada na função)
 
-        Serial.print("[CAL] Ponto ");
-        Serial.print(idx);
-        Serial.print(" | Tensao: ");
-        Serial.println(leiturasV[idx], 4);
+        Serial.print("[CAL] Amostra ");
+        Serial.print(idx + 1);
+        Serial.print("/6 gravada. (Tensão: ");
+        Serial.print(leiturasV[idx], 4);
+        Serial.println(" V)");
 
         estadoAtual      = (EstadoCalib)((int)estadoAtual + 1);
         confirmarLeitura = false;
@@ -351,28 +361,38 @@ void loop() {
         if (estadoAtual <= CAL_500) {
           int ntuProximo = (int)valoresNTU[(int)estadoAtual - 1];
           enviarMensagemBLE(String(ntuProximo) + "_NTU");
+          Serial.print("[STATUS] Aguardando confirmacao para ");
+          Serial.print(ntuProximo);
+          Serial.println(" NTU.");
         }
       }
     }
     else if (estadoAtual == PROCESSAR) {
       enviarMensagemBLE("PROCESSANDO");
-      calcularNovaCurva(); // Calcula e salva os novos coeficientes
+      Serial.println("[STATUS] Processando matriz de calibracao...");
+      calcularNovaCurva(); // Calcula, imprime A, B e C, e salva na flash
       estadoAtual = IDLE;
     }
   }
 
-  // --- MODO MONITORAMENTO (10 em 10 segundos, sem delay bloqueante) ---
+  // --- MODO MONITORAMENTO (10 em 10 segundos) ---
   else {
-    if (deviceConnected) {
-      unsigned long agora = millis();
-      if (agora - ultimoEnvio >= INTERVALO_MS) {
-        ultimoEnvio = agora;
-        String jsonData = criarJsonTurbidez();
+    unsigned long agora = millis();
+    if (agora - ultimoEnvio >= INTERVALO_MS) {
+      ultimoEnvio = agora;
+      
+      // Gera o JSON com Voltagem, NTU e Nível
+      String jsonData = criarJsonTurbidez();
+      
+      // Se tiver Bluetooth conectado, avisa o Front
+      if (deviceConnected) {
         pTxCharacteristic->setValue(jsonData.c_str());
         pTxCharacteristic->notify();
-        Serial.print("[MONITOR] ");
-        Serial.println(jsonData);
       }
+      
+      // Sempre exibe no Serial Monitor para acompanhamento
+      Serial.print("[MONITORAMENTO 10s] ");
+      Serial.println(jsonData);
     }
   }
 }
