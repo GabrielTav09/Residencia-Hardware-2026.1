@@ -1,0 +1,477 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+
+// --- UUIDs NUS ---
+#define SERVICE_UUID "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define CHARACTERISTIC_UUID_RX "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+#define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
+// --- Hardware ---
+const int turbidezPin = 35;
+
+// --- BLE ---
+BLECharacteristic *pTxCharacteristic;
+bool deviceConnected = false;
+bool confirmarLeitura = false;
+
+// --- Preferences (memória flash) ---
+Preferences preferences;
+
+// --- Coeficientes da fórmula NTU = ax² + bx + c ---
+float coefA, coefB, coefC;
+
+// --- Curva de referência: NTU = -1120.4·V² + 5742.3·V - 4353.8 ---
+// A calibração só pode deslocar a curva em no máximo ±15 NTU em relação a ela.
+const float A_REF = -1120.4;
+const float B_REF = 5742.3;
+const float C_REF = -4353.8;
+const float DESVIO_MAX_NTU = 15.0;
+
+// Faixa útil da curva de referência:
+//   V_MIN_CURVA = vértice da parábola (~3000 NTU). Abaixo disso a parábola
+//                 "volta" e daria valores errados, então trava em 3000 NTU.
+//   V_MAX_CURVA = raiz da parábola (0 NTU).
+const float V_MIN_CURVA = 2.5626;
+const float V_MAX_CURVA = 4.2;
+
+// --- Máquina de estados ---
+enum EstadoCalib { IDLE,
+                   CAL_0,
+                   CAL_500,
+                   PROCESSAR };
+EstadoCalib estadoAtual = IDLE;
+
+float leiturasV[2];
+const float valoresNTU[] = { 0, 500 };
+
+// --- Controle de envio periódico (sem delay bloqueante) ---
+unsigned long ultimoEnvio = 0;
+const unsigned long INTERVALO_MS = 10000;  // 10 segundos
+
+// --- Controle de inatividade na calibração ---
+unsigned long ultimaInteracao = 0;
+const unsigned long TIMEOUT_MS = 90000;  // 1 minuto e 30 segundos
+
+// =============================================================================
+// COMUNICAÇÃO
+// =============================================================================
+
+void enviarMensagemBLE(String msg) {
+  if (deviceConnected) {
+    pTxCharacteristic->setValue(msg.c_str());
+    pTxCharacteristic->notify();
+    Serial.print("[TX] ");
+    Serial.println(msg);
+  } else {
+    Serial.print("[TX ignorado - sem conexao] ");
+    Serial.println(msg);
+  }
+}
+
+// =============================================================================
+// LEITURA REAL DE TENSÃO
+//
+// PONTO CRÍTICO #1 — BLOQUEIO DE 800ms
+// Esta função bloqueia o loop() por ~800ms (800 leituras × 1ms).
+// Se um comando BLE (START_CAL, CONFIRM) chegar nessa janela,
+// o callback onWrite() aguarda na fila do stack BLE e só executa
+// depois que lerVoltagemPura() retornar. Em situações normais não
+// causa desconexão, mas atrasa a resposta ao Frontend em até 800ms.
+// SOLUÇÃO FUTURA: substituir delay(1) por leituras acumuladas via millis().
+// =============================================================================
+
+float lerVoltagemPura() {
+  float voltagem = 0;
+  for (int i = 0; i < 800; i++) {
+    voltagem += ((float)analogRead(turbidezPin) / 4095.0) * 3.3;
+    delay(1);
+  }
+  voltagem /= 800.0;
+  Serial.print("Média da Tensão: ");
+  Serial.println(voltagem);
+  return voltagem;
+}
+
+// =============================================================================
+// CURVA DE REFERÊNCIA — Auxiliares para calibração limitada
+// =============================================================================
+
+// NTU segundo a curva de referência (sem calibração)
+float curvaReferencia(float v) {
+  return (A_REF * v * v) + (B_REF * v) + C_REF;
+}
+
+// Maior diferença (em NTU) entre uma curva a,b,c e a curva de referência,
+// avaliada em toda a faixa útil [V_MIN_CURVA, V_MAX_CURVA]
+float desvioMaximoCurva(float a, float b, float c) {
+  float maxDesvio = 0;
+  const int N = 100;
+  for (int i = 0; i <= N; i++) {
+    float v = V_MIN_CURVA + (V_MAX_CURVA - V_MIN_CURVA) * i / N;
+    float d = fabs(((a * v * v) + (b * v) + c) - curvaReferencia(v));
+    if (d > maxDesvio) maxDesvio = d;
+  }
+  return maxDesvio;
+}
+
+// =============================================================================
+// CÁLCULO NTU — Converte tensão para turbidez usando a fórmula calibrada
+// =============================================================================
+
+float lerTurbidez() {
+  float voltagem = lerVoltagemPura();
+  float ntu;
+
+  if (voltagem < V_MIN_CURVA) ntu = 3000;    // Abaixo da curva — muito turvo
+  else if (voltagem > V_MAX_CURVA) ntu = 0;  // Acima da curva — água limpa
+  else {
+    ntu = (coefA * voltagem * voltagem) + (coefB * voltagem) + coefC;
+  }
+
+  return (ntu < 0) ? 0 : ntu;
+}
+
+// =============================================================================
+// CLASSIFICAÇÃO — Traduz NTU em qualidade da água
+// =============================================================================
+
+String classificarTurbidez(float ntu) {
+  if (ntu <= 50) return "Boa para o peixe caranha (pouco turva)";
+  else if (ntu <= 250) return "Moderada para o peixe caranha (turbidez mediana)";
+  else return "Inadequada para o peixe caranha (muito turva)";
+}
+
+// =============================================================================
+// JSON DE MONITORAMENTO — Envia leitura real calibrada ao Frontend
+// =============================================================================
+
+String criarJsonTurbidez() {
+  float turbidez = lerTurbidez();
+  String nivel = classificarTurbidez(turbidez);
+
+  StaticJsonDocument<200> json;
+  json["turbidez"] = turbidez;
+  json["nivel"] = nivel;
+  json["timestamp"] = millis();
+
+  String resposta;
+  serializeJson(json, resposta);
+  return resposta;
+}
+
+// =============================================================================
+// CALIBRAÇÃO DE 2 PONTOS SOBRE A CURVA DE REFERÊNCIA
+//
+// Executada após coletar os 2 pontos de calibração (0 e 500 NTU).
+// A nova curva é a curva de referência somada a uma correção linear:
+//
+//   NTU(V) = curvaReferencia(V) + (p·V + q)
+//
+// p e q são calculados para que a curva passe pelos dois pontos medidos.
+// Em seguida a correção é limitada a ±15 NTU nas duas pontas da faixa útil.
+// Como a correção é uma reta, limitar as pontas garante que a nova curva
+// nunca se afasta mais de 15 NTU da curva de referência em toda a faixa.
+//
+// O termo "a" permanece igual ao da referência (-1120.4); só b e c mudam.
+// Salva os coeficientes na memória flash (Preferences) para persistir após reboot
+// =============================================================================
+
+void calcularNovaCurva() {
+  double v0   = leiturasV[0];  // tensão medida na amostra de 0 NTU
+  double v500 = leiturasV[1];  // tensão medida na amostra de 500 NTU
+
+  // Água limpa deve gerar tensão MAIOR que a amostra turva.
+  // Tensões iguais ou invertidas indicam amostras ou leituras inválidas.
+  if (v0 - v500 < 0.01) {
+    Serial.println("[CAL] ERRO: tensoes de 0 e 500 NTU iguais ou invertidas. Verifique as amostras.");
+    enviarMensagemBLE("CALIB_ERRO");
+    return;
+  }
+
+  // Quanto a curva de referência erra em cada ponto medido
+  double erro0   = valoresNTU[0] - curvaReferencia(v0);
+  double erro500 = valoresNTU[1] - curvaReferencia(v500);
+
+  Serial.print("[CAL] Erro da curva de referencia em 0 NTU:   ");
+  Serial.println(erro0, 2);
+  Serial.print("[CAL] Erro da curva de referencia em 500 NTU: ");
+  Serial.println(erro500, 2);
+
+  // Correção linear que passa exatamente pelos dois pontos
+  double p = (erro500 - erro0) / (v500 - v0);
+  double q = erro0 - p * v0;
+
+  // Correção nas extremidades da faixa útil
+  double corrMin = p * V_MIN_CURVA + q;
+  double corrMax = p * V_MAX_CURVA + q;
+
+  // Limita a ±15 NTU
+  bool limitado = false;
+  if (corrMin >  DESVIO_MAX_NTU) { corrMin =  DESVIO_MAX_NTU; limitado = true; }
+  if (corrMin < -DESVIO_MAX_NTU) { corrMin = -DESVIO_MAX_NTU; limitado = true; }
+  if (corrMax >  DESVIO_MAX_NTU) { corrMax =  DESVIO_MAX_NTU; limitado = true; }
+  if (corrMax < -DESVIO_MAX_NTU) { corrMax = -DESVIO_MAX_NTU; limitado = true; }
+
+  if (limitado) {
+    // Recalcula a reta de correção a partir das pontas já limitadas
+    p = (corrMax - corrMin) / (V_MAX_CURVA - V_MIN_CURVA);
+    q = corrMin - p * V_MIN_CURVA;
+    Serial.println("[CAL] AVISO: correcao excedia 15 NTU e foi limitada a curva de referencia.");
+  }
+
+  coefA = A_REF;
+  coefB = B_REF + p;
+  coefC = C_REF + q;
+
+  // Salva na memória flash para persistir após reboot
+  preferences.begin("turb_cal", false);
+  preferences.putFloat("a", coefA);
+  preferences.putFloat("b", coefB);
+  preferences.putFloat("c", coefC);
+  preferences.end();
+
+  Serial.println("[CAL] Novos coeficientes salvos:");
+  Serial.print("  A = ");
+  Serial.println(coefA, 6);
+  Serial.print("  B = ");
+  Serial.println(coefB, 6);
+  Serial.print("  C = ");
+  Serial.println(coefC, 6);
+  Serial.print("[CAL] Desvio maximo em relacao a curva de referencia: ");
+  Serial.print(desvioMaximoCurva(coefA, coefB, coefC), 2);
+  Serial.println(" NTU");
+
+  enviarMensagemBLE("CALIB_OK");
+}
+
+// =============================================================================
+// INATIVIDADE — Encerra calibração automaticamente após 1min30s sem interação
+// Interações que resetam o timer: CONFIRM e START_CAL
+// Retorna ao estado IDLE e notifica o Frontend com "INATIV"
+// =============================================================================
+
+void verificarInatividade() {
+  if (estadoAtual == IDLE) return;
+
+  if (millis() - ultimaInteracao >= TIMEOUT_MS) {
+    estadoAtual = IDLE;
+    confirmarLeitura = false;
+    enviarMensagemBLE("INATIV");
+    Serial.println("[INATIV] Calibracao encerrada por inatividade (1min30s).");
+  }
+}
+
+// =============================================================================
+// CALLBACKS BLE
+// =============================================================================
+
+// PONTO CRÍTICO #2 — RECONEXÃO
+// Sem o startAdvertising() manual no onDisconnect, o ESP32 some
+// da lista BLE após a primeira desconexão e o app não o encontra mais.
+// O delay(500) evita falha no startAdvertising() em alguns firmwares.
+
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *pServer) override {
+    deviceConnected = true;
+    Serial.println("[BLE] Conectado.");
+  }
+  void onDisconnect(BLEServer *pServer) override {
+    deviceConnected = false;
+    Serial.println("[BLE] Desconectado. Reiniciando advertising...");
+    delay(500);
+    pServer->getAdvertising()->start();
+  }
+};
+
+void processarComando(String rxValue) {
+  if (rxValue == "START_CAL") {
+    ultimaInteracao = millis();
+    if (estadoAtual == IDLE) {
+      estadoAtual      = CAL_0;
+      confirmarLeitura = false;
+      enviarMensagemBLE("0_NTU");
+    } else {
+      estadoAtual      = IDLE;
+      confirmarLeitura = false;
+      enviarMensagemBLE("CALIB_CANCELADA");
+    }
+  }
+  else if (rxValue == "CONFIRM") {
+    if (estadoAtual != IDLE && estadoAtual != PROCESSAR) {
+      ultimaInteracao  = millis();
+      confirmarLeitura = true;
+    } else {
+      enviarMensagemBLE("FORA_DE_CONT");
+    }
+  }
+  else if (rxValue == "GET_TURBIDEZ") {
+    if (estadoAtual == IDLE) {
+      String jsonData = criarJsonTurbidez();
+      // Tenta enviar via BLE se estiver conectado
+      if(deviceConnected) {
+        pTxCharacteristic->setValue(jsonData.c_str());
+        pTxCharacteristic->notify();
+      }
+      // Sempre imprime no monitor serial
+      Serial.print("[TX] ");
+      Serial.println(jsonData);
+    } else {
+      enviarMensagemBLE("ERRO_CALIB");
+    }
+  }
+  else {
+    enviarMensagemBLE("ERRO_DESCONHECIDO:" + rxValue);
+  }
+}
+
+// PONTO CRÍTICO #3 — CALLBACK RODA NA TASK BLE
+// Nunca chame lerVoltagemPura() diretamente aqui.
+// Use apenas flags e deixe o loop() processar.
+//
+// PONTO CRÍTICO #4 — STRINGS VAZIAS
+// Alguns dispositivos Android enviam uma escrita vazia antes do comando real.
+
+class MyCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) override {
+    String rxValue = pCharacteristic->getValue();
+
+    if (rxValue.length() == 0) return;
+
+    Serial.print("[BLE RX] ");
+    Serial.println(rxValue);
+    
+    // Passa o comando recebido do celular para a função processar
+    processarComando(rxValue);
+  }
+};
+
+// =============================================================================
+// SETUP
+// =============================================================================
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(turbidezPin, INPUT);
+  Serial.println("\n=== NEPTUS — SENSOR DE TURBIDEZ BLE ===");
+
+  // Carrega coeficientes salvos ou usa a curva de referência
+  preferences.begin("turb_cal", true);
+  coefA = preferences.getFloat("a", A_REF);
+  coefB = preferences.getFloat("b", B_REF);
+  coefC = preferences.getFloat("c", C_REF);
+  preferences.end();
+
+  // Coeficientes antigos (ex.: da calibração de 6 pontos) ou corrompidos
+  // que fogem mais de 15 NTU da curva de referência são descartados.
+  // A negação (!) também captura valores NaN.
+  if (!(desvioMaximoCurva(coefA, coefB, coefC) <= DESVIO_MAX_NTU + 0.5)) {
+    Serial.println("[CAL] Coeficientes salvos fora da curva de referencia. Usando curva padrao.");
+    coefA = A_REF;
+    coefB = B_REF;
+    coefC = C_REF;
+  }
+
+  Serial.println("[CAL] Coeficientes carregados:");
+  Serial.print("  A = ");
+  Serial.println(coefA, 6);
+  Serial.print("  B = ");
+  Serial.println(coefB, 6);
+  Serial.print("  C = ");
+  Serial.println(coefC, 6);
+
+  BLEDevice::init("ESP32-NEPTUS-TURB");
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_RX,
+    BLECharacteristic::PROPERTY_WRITE);
+  pRxCharacteristic->setCallbacks(new MyCallbacks());
+
+  pTxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_TX,
+    BLECharacteristic::PROPERTY_NOTIFY);
+  pTxCharacteristic->addDescriptor(new BLE2902());
+
+  pService->start();
+  BLEDevice::getAdvertising()->addServiceUUID(SERVICE_UUID);
+  BLEDevice::startAdvertising();
+
+  Serial.println("[BLE] Advertising iniciado.");
+}
+
+// =============================================================================
+// LOOP
+// =============================================================================
+
+void loop() {
+  // --- ESCUTA COMANDOS DO MONITOR SERIAL ---
+  if (Serial.available() > 0) {
+    String comandoSerial = Serial.readStringUntil('\n');
+    comandoSerial.trim(); // Limpa espaços extras e "Enter" (\r\n) invisível
+    
+    if (comandoSerial.length() > 0) {
+      Serial.print("[SERIAL RX] ");
+      Serial.println(comandoSerial);
+      processarComando(comandoSerial);
+    }
+  }
+
+  // --- VERIFICA INATIVIDADE (roda sempre, age só durante calibração) ---
+  verificarInatividade();
+
+  // --- MODO CALIBRAÇÃO ---
+  if (estadoAtual != IDLE) {
+    if (estadoAtual >= CAL_0 && estadoAtual <= CAL_500) {
+      if (confirmarLeitura) {
+        int idx = (int)estadoAtual - 1;
+
+        enviarMensagemBLE("LENDO");
+        leiturasV[idx] = lerVoltagemPura();  // Armazena tensão real para o cálculo
+
+        Serial.print("[CAL] Ponto ");
+        Serial.print(idx);
+        Serial.print(" | Tensao: ");
+        Serial.println(leiturasV[idx], 4);
+
+        estadoAtual = (EstadoCalib)((int)estadoAtual + 1);
+        confirmarLeitura = false;
+
+        if (estadoAtual <= CAL_500) {
+          int ntuProximo = (int)valoresNTU[(int)estadoAtual - 1];
+          enviarMensagemBLE(String(ntuProximo) + "_NTU");
+        }
+      }
+    } else if (estadoAtual == PROCESSAR) {
+      enviarMensagemBLE("PROCESSANDO");
+      calcularNovaCurva();  // Calcula e salva os novos coeficientes
+      estadoAtual = IDLE;
+    }
+  }
+
+  // --- MODO MONITORAMENTO (10 em 10 segundos, sem delay bloqueante) ---
+    else {
+      unsigned long agora = millis();
+      if (agora - ultimoEnvio >= INTERVALO_MS) {
+        ultimoEnvio = agora;
+        String jsonData = criarJsonTurbidez();
+      
+        // Envia via BLE APENAS se estiver conectado
+        if (deviceConnected) {
+         pTxCharacteristic->setValue(jsonData.c_str());
+         pTxCharacteristic->notify();
+       }
+      
+       // Imprime no Monitor Serial SEMPRE (conectado ou não)
+        Serial.print("[MONITOR] ");
+       Serial.println(jsonData);
+      }
+   }
+  }
