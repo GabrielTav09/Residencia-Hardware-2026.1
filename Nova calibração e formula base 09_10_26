@@ -36,8 +36,8 @@ const float DESVIO_MAX_NTU = 15.0;
 //   V_MIN_CURVA = vértice da parábola (~3000 NTU). Abaixo disso a parábola
 //                 "volta" e daria valores errados, então trava em 3000 NTU.
 //   V_MAX_CURVA = raiz da parábola (0 NTU).
-const float V_MIN_CURVA = 2.5626;
-const float V_MAX_CURVA = 4.2;
+const float V_MIN_CURVA = 1.0; 
+const float V_MAX_CURVA = 3.0;
 
 // --- Máquina de estados ---
 enum EstadoCalib { IDLE,
