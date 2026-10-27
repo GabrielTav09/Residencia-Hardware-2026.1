@@ -67,33 +67,36 @@ Estes comandos devem ser enviados como strings de texto puro para a característ
 * `START_CAL`: Inicia o processo de calibração (caso o sistema esteja em modo de operação normal `IDLE`) ou cancela imediatamente o processo atual se ele já estiver em curso (forçando o retorno ao monitoramento e restaurando as configurações anteriores).
 * `CONFIRM`: Funciona como o comando de **Avançar / Confirmar**. Deve ser enviado pelo Front-end após o utilizador posicionar fisicamente o frasco com o líquido de referência na fenda do sensor e clicar para validar, autorizando o ESP32 a capturar o ponto atual e avançar para o próximo.
 * `GET_TURBIDEZ`: Solicita manualmente uma leitura de medição instantânea. O ESP32 responderá enviando o JSON com os dados de turbidez. *Nota: Este comando gerará um erro se enviado enquanto uma calibração estiver ativa.*
+* `RESET_CALIB`: Apaga a calibração salva na memória flash do ESP32 e volta imediatamente a usar a fórmula padrão (`NTU = -1666,7·V² + 2166,7·V + 650`). Após o reset, o sistema segue o fluxo normal: o monitoramento continua e uma nova calibração pode ser iniciada com `START_CAL`. *Nota: Este comando gerará um erro se enviado enquanto uma calibração estiver ativa. Para resetar no meio de uma calibração, cancele antes com `START_CAL`.*
 
 ### ⤵ 2. Mensagens de Notificação de Estado e Erros (ESP32 para o Front-end)
 Enviadas como strings de texto puro pela característica **TX** do serviço BLE para orientar dinamicamente a interface do utilizador e tratar exceções.
 
 ### A. Fluxo de Calibração e Estados normais
 * `0_NTU`: Indica o início do ciclo de calibração e sinaliza para a interface instruir o utilizador a inserir o líquido de calibração padrão de 0 NTU.
-* `100_NTU`: Solicita a troca física do frasco para a referência de 100 NTU.
-* `200_NTU`: Solicita a troca física do frasco para a referência de 200 NTU.
-* `300_NTU`: Solicita a troca física do frasco para a referência de 300 NTU.
-* `400_NTU`: Solicita a troca física do frasco para a referência de 400 NTU.
-* `500_NTU`: Solicita a troca física do frasco para a última referência de 500 NTU.
-* `LENDO`: Emitido no momento exato em que o ESP32 realiza a captura de amostras de um ponto. O Front-end deve exibir um feedback visual de carregamento (*spinner*) e bloquear interações para evitar cliques duplos.
-* `PROCESSANDO`: Enviado logo após o último ponto (500 NTU) ser confirmado, indicando que a amostragem acabou e o núcleo do ESP32 está a processar os cálculos matemáticos da Regressão Polinomial.
-* `CALIB_OK`: Notificação enviada quando a calibração é concluída com sucesso. A interface do Front-end deve exibir uma mensagem de êxito e redirecionar o utilizador para o painel principal de monitoramento.
-* `CALIB_CANCELADA`: Confirmação de interrupção, enviada pelo hardware quando o processo é cancelado a meio devido ao recebimento de um segundo comando `START_CAL`.
+* `500_NTU`: Solicita a troca física do frasco para a segunda e última referência de 500 NTU.
+* `LENDO`: Emitido no momento exato em que o ESP32 realiza a captura de amostras de um ponto (cerca de 0,8 s). O Front-end deve exibir um feedback visual de carregamento (*spinner*) e bloquear interações para evitar cliques duplos.
+* `PROCESSANDO`: Enviado logo após o último ponto (500 NTU) ser confirmado, indicando que a amostragem acabou e o ESP32 está a calcular o ajuste da fórmula padrão (deslocamento constante igual à média dos erros nos dois pontos, limitado a ±15 NTU).
+* `CALIB_OK`: Notificação enviada quando a calibração é concluída com sucesso e salva na memória flash. A calibração permanece válida mesmo após reiniciar o ESP32, até uma nova calibração ou um `RESET_CALIB`. A interface do Front-end deve exibir uma mensagem de êxito e redirecionar o utilizador para o painel principal de monitoramento.
+* `CALIB_CANCELADA`: Confirmação de interrupção, enviada pelo hardware quando o processo é cancelado a meio devido ao recebimento de um segundo comando `START_CAL`. Nada é salvo e a calibração anterior continua válida.
+* `INATIV`: Enviado quando a calibração é encerrada automaticamente por inatividade (1min30s sem receber `START_CAL` ou `CONFIRM`). O sistema volta ao monitoramento, nada é salvo e a calibração anterior continua válida.
+* `CALIB_RESETADA`: Confirmação de que o comando `RESET_CALIB` foi executado: a calibração salva foi apagada e o sistema passou a medir com a fórmula padrão.
 
 ### B. Mensagens de Erro
-* `FORA_DE_CONT`: O usuário aperta "confirmar" no app antes de ter iniciado a calibração com START_CAL, o usuário aperta "confirmar" uma 7ª vez depois que todos os 6 pontos já foram coletados (quando o estado já virou PROCESSAR) ou o app reconectou e reenviou um CONFIRM_STEP que estava em buffer
-* `ERRO_CALIB`: O usuário está no meio de uma calibração e outra tela do app tenta puxar uma leitura normal ao mesmo tempo ou o app tem um timer automático de GET_TURBIDEZ que não foi pausado ao entrar no fluxo de calibração
+* `FORA_DE_CONT`: O usuário aperta "confirmar" no app antes de ter iniciado a calibração com START_CAL, o usuário aperta "confirmar" uma 3ª vez depois que os 2 pontos já foram coletados (quando o estado já virou PROCESSAR) ou o app reconectou e reenviou um CONFIRM que estava em buffer
+* `ERRO_CALIB`: O usuário está no meio de uma calibração e outra tela do app tenta puxar uma leitura normal ao mesmo tempo, o app tem um timer automático de GET_TURBIDEZ que não foi pausado ao entrar no fluxo de calibração, ou foi enviado RESET_CALIB durante uma calibração
+* `CALIB_ERRO`: A calibração falhou no cálculo final porque a tensão da amostra de 0 NTU não ficou pelo menos 0,01 V acima da tensão da amostra de 500 NTU. Acontece quando as amostras foram trocadas, a mesma amostra foi usada nos dois pontos, o sensor está sujo ou mal encaixado, ou o sensor está desconectado. Nada é salvo e a calibração anterior continua válida
+* `ERRO_RESET`: O ESP32 não conseguiu acessar a memória flash para apagar a calibração após um RESET_CALIB (situação rara). A calibração atual continua em uso; o comando pode ser enviado novamente
 * `ERRO_DESCONHECIDO:xyz`: Erro de digitação no Frontend, como start_cal (minúsculo) ou STARTCAL sem underscore. Problema de encoding enviando caracteres extras, como START_CAL\n ou START_CAL\r\n — o \n quebra a comparação
 
-### 3. Pacote de Dados de Monitorização (Modo Normal)
-Quando o sistema se encontra no estado `IDLE` (Operação de Rotina), o ESP32 transmite autonomamente a cada **2 segundos** um pacote formatado em **JSON** contendo as seguintes variáveis:
+### C. Dados de Monitoramento
+Fora da calibração, o ESP32 envia automaticamente a cada 10 segundos (e também ao receber `GET_TURBIDEZ`) um JSON no formato:
 
 ```json
-{
-  "turbidez": 42.15,
-  "nivel": "Boa para o peixe caranha (pouco turva)",
-  "timestamp": 124500
-}
+{"turbidez": 12.5, "nivel": "Boa para o peixe caranha (pouco turva)", "timestamp": 123456}
+```
+
+* `turbidez`: Valor em NTU. Retorna `0` quando a tensão está acima da curva (água limpa) e `3000` quando está abaixo da curva (muito turva).
+* `nivel`: Classificação da água — "Boa" até 50 NTU, "Moderada" até 250 NTU e "Inadequada" acima de 250 NTU.
+* `timestamp`: Tempo em milissegundos desde que o ESP32 foi ligado.
+
