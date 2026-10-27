@@ -25,17 +25,14 @@ Preferences preferences;
 // --- Coeficientes da fórmula NTU = ax² + bx + c ---
 float coefA, coefB, coefC;
 
-// --- Curva de referência: NTU = -1120.4·V² + 5742.3·V - 4353.8 ---
+// --- Curva de referência: NTU = -1666.7·V² + 2166.7·V + 650 ---
 // A calibração só pode deslocar a curva em no máximo ±15 NTU em relação a ela.
-const float A_REF = -1120.4;
-const float B_REF = 5742.3;
-const float C_REF = -4353.8;
+const float A_REF = -1666.7;
+const float B_REF = 2166.7;
+const float C_REF = 650.0;
 const float DESVIO_MAX_NTU = 15.0;
 
-// Faixa útil da curva de referência:
-//   V_MIN_CURVA = vértice da parábola (~3000 NTU). Abaixo disso a parábola
-//                 "volta" e daria valores errados, então trava em 3000 NTU.
-//   V_MAX_CURVA = raiz da parábola (0 NTU).
+// Faixa útil da curva de referência para 3.3V:
 const float V_MIN_CURVA = 0.6; 
 const float V_MAX_CURVA = 1.6;
 
