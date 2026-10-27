@@ -162,19 +162,20 @@ String criarJsonTurbidez() {
 }
 
 // =============================================================================
-// CALIBRAÇÃO DE 2 PONTOS SOBRE A CURVA DE REFERÊNCIA
+// CALIBRAÇÃO DE 2 PONTOS SOBRE A CURVA DE REFERÊNCIA (DESLOCAMENTO CONSTANTE)
 //
 // Executada após coletar os 2 pontos de calibração (0 e 500 NTU).
-// A nova curva é a curva de referência somada a uma correção linear:
+// A nova curva é a curva de referência deslocada por um valor constante:
 //
-//   NTU(V) = curvaReferencia(V) + (p·V + q)
+//   NTU(V) = -1666.7·V² + 2166.7·V + 650 + deslocamento
 //
-// p e q são calculados para que a curva passe pelos dois pontos medidos.
-// Em seguida a correção é limitada a ±15 NTU nas duas pontas da faixa útil.
-// Como a correção é uma reta, limitar as pontas garante que a nova curva
-// nunca se afasta mais de 15 NTU da curva de referência em toda a faixa.
+// O deslocamento é a média dos erros da curva de referência nos dois
+// pontos medidos, limitado a ±15 NTU. Como o deslocamento é o mesmo em
+// qualquer tensão, a nova curva nunca se afasta mais de 15 NTU da curva
+// de referência em toda a faixa.
 //
-// O termo "a" permanece igual ao da referência (-1120.4); só b e c mudam.
+// Os termos "a" (-1666.7) e "b" (2166.7) permanecem iguais aos da
+// referência; só o termo "c" (650) muda.
 // Salva os coeficientes na memória flash (Preferences) para persistir após reboot
 // =============================================================================
 
@@ -199,31 +200,25 @@ void calcularNovaCurva() {
   Serial.print("[CAL] Erro da curva de referencia em 500 NTU: ");
   Serial.println(erro500, 2);
 
-  // Correção linear que passa exatamente pelos dois pontos
-  double p = (erro500 - erro0) / (v500 - v0);
-  double q = erro0 - p * v0;
+  // Deslocamento constante = média dos erros nos dois pontos
+  double deslocamento = (erro0 + erro500) / 2.0;
 
-  // Correção nas extremidades da faixa útil
-  double corrMin = p * V_MIN_CURVA + q;
-  double corrMax = p * V_MAX_CURVA + q;
+  Serial.print("[CAL] Deslocamento calculado: ");
+  Serial.print(deslocamento, 2);
+  Serial.println(" NTU");
 
   // Limita a ±15 NTU
-  bool limitado = false;
-  if (corrMin >  DESVIO_MAX_NTU) { corrMin =  DESVIO_MAX_NTU; limitado = true; }
-  if (corrMin < -DESVIO_MAX_NTU) { corrMin = -DESVIO_MAX_NTU; limitado = true; }
-  if (corrMax >  DESVIO_MAX_NTU) { corrMax =  DESVIO_MAX_NTU; limitado = true; }
-  if (corrMax < -DESVIO_MAX_NTU) { corrMax = -DESVIO_MAX_NTU; limitado = true; }
-
-  if (limitado) {
-    // Recalcula a reta de correção a partir das pontas já limitadas
-    p = (corrMax - corrMin) / (V_MAX_CURVA - V_MIN_CURVA);
-    q = corrMin - p * V_MIN_CURVA;
+  if (deslocamento > DESVIO_MAX_NTU) {
+    deslocamento = DESVIO_MAX_NTU;
+    Serial.println("[CAL] AVISO: correcao excedia 15 NTU e foi limitada a curva de referencia.");
+  } else if (deslocamento < -DESVIO_MAX_NTU) {
+    deslocamento = -DESVIO_MAX_NTU;
     Serial.println("[CAL] AVISO: correcao excedia 15 NTU e foi limitada a curva de referencia.");
   }
 
   coefA = A_REF;
-  coefB = B_REF + p;
-  coefC = C_REF + q;
+  coefB = B_REF;
+  coefC = C_REF + deslocamento;
 
   // Salva na memória flash para persistir após reboot
   preferences.begin("turb_cal", false);
@@ -317,6 +312,42 @@ void processarComando(String rxValue) {
       // Sempre imprime no monitor serial
       Serial.print("[TX] ");
       Serial.println(jsonData);
+    } else {
+      enviarMensagemBLE("ERRO_CALIB");
+    }
+  }
+  // RESET_CALIB — Apaga a calibração salva e volta para a curva de referência
+  // Só é aceito fora da calibração. Para resetar no meio de uma calibração,
+  // cancele antes com START_CAL.
+  else if (rxValue == "RESET_CALIB") {
+    if (estadoAtual == IDLE) {
+      // Apaga os coeficientes salvos na memória flash
+      bool apagado = preferences.begin("turb_cal", false);
+      if (apagado) {
+        apagado = preferences.clear();
+        preferences.end();
+      }
+
+      if (apagado) {
+        // Volta a usar a curva de referência imediatamente
+        coefA = A_REF;
+        coefB = B_REF;
+        coefC = C_REF;
+
+        Serial.println("[CAL] Calibracao resetada. Usando curva padrao:");
+        Serial.print("  A = ");
+        Serial.println(coefA, 6);
+        Serial.print("  B = ");
+        Serial.println(coefB, 6);
+        Serial.print("  C = ");
+        Serial.println(coefC, 6);
+
+        enviarMensagemBLE("CALIB_RESETADA");
+      } else {
+        // Falha ao acessar a flash: mantém a calibração atual
+        Serial.println("[CAL] ERRO: nao foi possivel apagar a calibracao da memoria flash.");
+        enviarMensagemBLE("ERRO_RESET");
+      }
     } else {
       enviarMensagemBLE("ERRO_CALIB");
     }
