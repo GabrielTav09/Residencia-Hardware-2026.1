@@ -14,6 +14,13 @@
 // --- Hardware ---
 const int turbidezPin = 35;
 
+// --- LDR (alimentado em 5V com divisor de tensão) ---
+// Ligação: 5V → R1 6,8kΩ → LDR → GPIO34 → R2 10kΩ → GND
+// R1 limita a tensão no pino a no máximo 5 × 10 / 16,8 ≈ 2,98V,
+// mesmo com o LDR em 0Ω. Mais luz = mais tensão no pino.
+const int ldrPin = 34;
+const float V_MAX_LDR = 5.0 * 10.0 / (6.8 + 10.0);  // ~2,98V
+
 // --- BLE ---
 BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
@@ -95,6 +102,33 @@ float lerVoltagemPura() {
 }
 
 // =============================================================================
+// LEITURA DO LDR — Luminosidade relativa em % (0 = escuro, 100 = luz máxima)
+// Média de 64 leituras (~32ms) para reduzir ruído sem travar o loop.
+// O valor é relativo à tensão máxima do divisor, não é medida em lux.
+// =============================================================================
+
+float lerLuminosidade() {
+  float voltagem = 0;
+  for (int i = 0; i < 64; i++) {
+    voltagem += ((float)analogRead(ldrPin) / 4095.0) * 3.3;
+    delayMicroseconds(500);
+  }
+  voltagem /= 64.0;
+
+  float percentual = (voltagem / V_MAX_LDR) * 100.0;
+  if (percentual > 100) percentual = 100;
+  if (percentual < 0) percentual = 0;
+
+  Serial.print("Luminosidade: ");
+  Serial.print(percentual, 1);
+  Serial.print(" % (Tensão LDR: ");
+  Serial.print(voltagem);
+  Serial.println(" V)");
+
+  return percentual;
+}
+
+// =============================================================================
 // CURVA DE REFERÊNCIA — Auxiliares para calibração limitada
 // =============================================================================
 
@@ -154,6 +188,7 @@ String criarJsonTurbidez() {
   StaticJsonDocument<200> json;
   json["turbidez"] = turbidez;
   json["nivel"] = nivel;
+  json["luminosidade"] = lerLuminosidade();
   json["timestamp"] = millis();
 
   String resposta;
@@ -385,6 +420,7 @@ class MyCallbacks : public BLECharacteristicCallbacks {
 void setup() {
   Serial.begin(115200);
   pinMode(turbidezPin, INPUT);
+  pinMode(ldrPin, INPUT);
   Serial.println("\n=== NEPTUS — SENSOR DE TURBIDEZ BLE ===");
 
   // Carrega coeficientes salvos ou usa a curva de referência
